@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cinelog</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Oswald:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+
+    <!-- Sidebar -->
+    <aside id="sidebar">
+      <div class="brand">
+        <img src="/cinelog_app_icon.svg" alt="Cinelog" class="brand-icon">
+        <span class="brand-name">Cinelog</span>
+      </div>
+      <nav>
+        <button class="nav-btn active" data-section="movies">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="15" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg>
+          My Movies
+        </button>
+        <button class="nav-btn" data-section="suggestions">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+          Suggestions
+        </button>
+        <button class="nav-btn" data-section="settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93l-1.41 1.41M4.93 4.93l1.41 1.41M12 2v2M12 20v2M20 12h2M2 12h2M19.07 19.07l-1.41-1.41M4.93 19.07l1.41-1.41"/></svg>
+          Settings
+        </button>
+      </nav>
+      <div id="sidebar-stats"></div>
+    </aside>
+
+    <!-- Main -->
+    <main id="main">
+
+      <!-- My Movies Section -->
+      <section id="section-movies" class="section">
+        <div class="section-header">
+          <h1>My Movies</h1>
+          <button id="btn-add" class="btn-primary">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add Movie
+          </button>
+        </div>
+        <div class="filter-bar" id="filter-bar">
+          <input type="text" id="search-movies" class="filter-search" placeholder="Search your movies…">
+          <select id="filter-type" class="filter-select">
+            <option value="">All Types</option>
+            <option value="movie">Movie</option>
+            <option value="tvSeries">TV Series</option>
+            <option value="tvMiniSeries">Mini Series</option>
+            <option value="tvMovie">TV Movie</option>
+          </select>
+          <select id="filter-year" class="filter-select"><option value="">All Years</option></select>
+          <select id="filter-genre" class="filter-select"><option value="">All Genres</option></select>
+          <select id="filter-rating" class="filter-select">
+            <option value="">Any Rating</option>
+            <option value="7">7.0+</option>
+            <option value="7.5">7.5+</option>
+            <option value="8">8.0+</option>
+            <option value="8.5">8.5+</option>
+          </select>
+          <select id="filter-sort" class="filter-select">
+            <option value="addedAt">Date Added</option>
+            <option value="rating">Rating</option>
+            <option value="year">Year</option>
+            <option value="title">Title</option>
+          </select>
+        </div>
+        <div id="movies-grid" class="movie-grid"></div>
+      </section>
+
+      <!-- Suggestions Section -->
+      <section id="section-suggestions" class="section hidden">
+        <div class="section-header">
+          <div>
+            <h1>Suggestions</h1>
+            <p class="section-sub">Based on your taste — genres, directors &amp; actors you love</p>
+          </div>
+          <button id="btn-refresh" class="btn-secondary">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            Refresh
+          </button>
+        </div>
+        <div id="suggestions-grid" class="movie-grid"></div>
+      </section>
+
+      <!-- Settings Section -->
+      <section id="section-settings" class="section hidden">
+        <div class="section-header">
+          <h1>Settings</h1>
+        </div>
+        <div class="settings-container">
+          <div class="settings-card">
+            <h2>Data Source</h2>
+            <p class="settings-desc">By default Cinelog uses the free IMDb API (<code>imdbapi.dev</code>). Add a TMDB API key for richer data and better suggestions.</p>
+            <div class="source-indicator">
+              <span class="source-dot" id="source-dot"></span>
+              <span id="data-source">Loading…</span>
+            </div>
+          </div>
+
+          <div class="settings-card">
+            <h2>TMDB API Key</h2>
+            <p class="settings-desc">Get your free API key at <strong>themoviedb.org/settings/api</strong> and paste it below.</p>
+            <form id="settings-form">
+              <div class="field-group">
+                <label for="setting-tmdb">API Key (v3 auth)</label>
+                <div class="input-row">
+                  <input type="password" id="setting-tmdb" placeholder="Paste your TMDB API key…" autocomplete="off">
+                  <button type="button" id="toggle-key" class="btn-icon" title="Show/hide key">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                  </button>
+                </div>
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="btn-primary">Save Settings</button>
+                <button type="button" id="btn-clear-key" class="btn-ghost">Clear Key</button>
+              </div>
+            </form>
+          </div>
+
+          <div class="settings-card">
+            <h2>About</h2>
+            <p class="settings-desc">Cinelog tracks movies you've watched and suggests new ones based on your taste in genres, directors, and actors.</p>
+            <p class="settings-desc">Movies are stored locally in <code>data/movies.json</code>.</p>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Add Movie Modal -->
+  <div id="modal-overlay" class="modal-overlay hidden">
+    <div id="modal" class="modal">
+      <div class="modal-header">
+        <h2>Add Movie</h2>
+        <button id="modal-close" class="btn-icon modal-close-btn" title="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div id="modal-search-panel">
+          <div class="search-bar">
+            <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" id="search-input" placeholder="Search by title or paste IMDB ID (tt…)" autocomplete="off">
+            <div id="search-spinner" class="search-spinner hidden"></div>
+          </div>
+          <div id="search-results" class="search-results"></div>
+        </div>
+        <div id="movie-preview" class="movie-preview hidden"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast container -->
+  <div id="toast-container"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
