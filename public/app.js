@@ -6,10 +6,11 @@ const state = {
   section: 'movies',
   movies: [],
   suggestions: [],
+  trash: [],
   settings: {},
-  filters: { type: '', year: '', genre: '', minRating: '', sort: 'addedAt', order: 'desc', q: '' },
+  filters: { type: '', year: '', genre: '', minRating: '', sort: 'addedAt', order: 'desc', q: '', minHearts: 0 },
   modal: { open: false, results: [], selected: null },
-  loading: { movies: false, suggestions: false }
+  loading: { movies: false, suggestions: false, trash: false }
 };
 
 // ── API client ────────────────────────────────────────────────────────────────
@@ -26,6 +27,8 @@ const api = {
   get: (url) => api.req('GET', url),
   post: (url, body) => api.req('POST', url, body),
   del: (url) => api.req('DELETE', url),
+  patch: (url, body) => api.req('PATCH', url, body),
+  setHearts: (id, hearts) => api.patch(`/api/movies/${encodeURIComponent(id)}/hearts`, { hearts }),
   search: (q) => api.get(`/api/search?q=${encodeURIComponent(q)}`),
   movieDetails: (id, type) => api.get(`/api/movie-details/${id}?type=${encodeURIComponent(type || '')}`),
   getMovies(filters = {}) {
@@ -38,7 +41,11 @@ const api = {
   removeMovie: (id) => api.del(`/api/movies/${id}`),
   getSuggestions: () => api.get('/api/suggestions'),
   getSettings: () => api.get('/api/settings'),
-  saveSettings: (data) => api.post('/api/settings', data)
+  saveSettings: (data) => api.post('/api/settings', data),
+  getTrash: () => api.get('/api/trash'),
+  restoreMovie: (id) => api.patch(`/api/movies/${encodeURIComponent(id)}/restore`, {}),
+  deleteForever: (id) => api.del(`/api/trash/${encodeURIComponent(id)}`),
+  emptyTrash: () => api.del('/api/trash')
 };
 
 // ── Utils ─────────────────────────────────────────────────────────────────────
@@ -85,37 +92,49 @@ function renderSidebar() {
     : '';
 }
 
-function movieCard(m, isSuggestion) {
+function movieCard(m, mode) {
+  // mode: 'watched' | 'suggestion' | 'trash'
+  const isTrash = mode === 'trash';
+  const isSuggestion = mode === 'suggestion';
+  const movieId = esc(m.imdbId || m.tmdbId || '');
   const poster = m.poster
     ? `<img class="poster" src="${esc(m.poster)}" alt="${esc(m.title)}" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
     : '';
   const noPostDisplay = m.poster ? 'none' : 'flex';
   const noPoster = `<div class="no-poster" style="display:${noPostDisplay}">🎬</div>`;
-
-  const genreHtml = (m.genres || []).slice(0, 3)
-    .map(g => `<span class="genre-tag">${esc(g)}</span>`).join('');
-
+  const genreHtml = (m.genres || []).slice(0, 3).map(g => `<span class="genre-tag">${esc(g)}</span>`).join('');
   const reasonsHtml = (m.reasons || []).length
-    ? `<div class="reasons">${(m.reasons || []).map(r => `<span class="reason-pill">${esc(r)}</span>`).join('')}</div>`
+    ? `<div class="reasons">${m.reasons.map(r => `<span class="reason-pill">${esc(r)}</span>`).join('')}</div>`
     : '';
 
-  const movieId = esc(m.imdbId || m.tmdbId || '');
+  const heartsHtml = (!isSuggestion && !isTrash) ? `
+    <div class="card-hearts" data-id="${movieId}">
+      ${[5,4,3,2,1].map(n => `<span class="card-heart${(m.hearts||0)>=n?' filled':''}" data-val="${n}">♥</span>`).join('')}
+    </div>` : '';
 
   const action = isSuggestion
-    ? `<button class="btn-small btn-add-suggestion"
+    ? `<div class="card-footer"><button class="btn-small btn-add-suggestion"
          data-imdb="${esc(m.imdbId || '')}"
          data-tmdb="${esc(m.tmdbId || '')}"
-         data-type="${esc(m.type || 'movie')}">+ Watched</button>`
-    : `<button class="btn-small btn-remove" data-id="${movieId}">Remove</button>`;
+         data-type="${esc(m.type || 'movie')}">+ Watched</button></div>`
+    : isTrash
+    ? `<div class="trash-actions">
+        <button class="btn-small btn-restore" data-id="${movieId}">↩ Restore</button>
+        <button class="btn-small btn-delete-forever" data-id="${movieId}">✕ Delete Forever</button>
+      </div>`
+    : '';
 
   return `
-    <div class="movie-card">
+    <div class="movie-card" data-id="${movieId}" data-imdb="${esc(m.imdbId || '')}"${m.imdbId ? ' style="cursor:pointer"' : ''}>
       <div class="poster-wrap">
         ${poster}${noPoster}
         <div class="card-overlay">
           ${m.rating ? `<span class="rating-badge">★ ${Number(m.rating).toFixed(1)}</span>` : '<span></span>'}
           <span class="type-badge">${esc(typeLabel(m.type))}</span>
         </div>
+        ${(!isSuggestion && !isTrash) ? `<button class="btn-remove-x" data-id="${movieId}" title="Move to Trash">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>` : ''}
       </div>
       <div class="card-body">
         <h3 class="card-title">${esc(m.title)}</h3>
@@ -127,7 +146,8 @@ function movieCard(m, isSuggestion) {
         ${m.directors?.length ? `<div class="directors">Dir: ${esc(m.directors.map(d => d.name).join(', '))}</div>` : ''}
         ${m.plot ? `<div class="plot">${esc(m.plot.slice(0, 110))}${m.plot.length > 110 ? '…' : ''}</div>` : ''}
         ${reasonsHtml}
-        <div class="card-footer">${action}</div>
+        ${heartsHtml}
+        ${action}
       </div>
     </div>`;
 }
@@ -143,6 +163,9 @@ function renderMovies() {
     const q = state.filters.q.toLowerCase();
     list = list.filter(m => m.title?.toLowerCase().includes(q));
   }
+  if (state.filters.minHearts > 0) {
+    list = list.filter(m => (m.hearts || 0) >= state.filters.minHearts);
+  }
   if (!list.length) {
     grid.innerHTML = state.movies.length
       ? '<div class="empty"><span>No movies match your filters.</span></div>'
@@ -152,7 +175,15 @@ function renderMovies() {
          </div>`;
     return;
   }
-  grid.innerHTML = list.map(m => movieCard(m, false)).join('');
+  grid.innerHTML = list.map(m => movieCard(m, 'watched')).join('');
+}
+
+function renderHeartFilter() {
+  const n = state.filters.minHearts;
+  document.querySelectorAll('#heart-filter .hf-heart').forEach(h => {
+    h.classList.toggle('filled', parseInt(h.dataset.val) <= n);
+  });
+  el('heart-filter').classList.toggle('active', n > 0);
 }
 
 function updateFilterOptions() {
@@ -180,7 +211,7 @@ function renderSuggestions() {
     grid.innerHTML = '<div class="empty"><span>No suggestions found. Try adding more movies to your list.</span></div>';
     return;
   }
-  grid.innerHTML = state.suggestions.map(m => movieCard(m, true)).join('');
+  grid.innerHTML = state.suggestions.map(m => movieCard(m, 'suggestion')).join('');
 }
 
 function renderSettings() {
@@ -188,6 +219,26 @@ function renderSettings() {
   const hasKey = Boolean(state.settings.tmdb);
   el('data-source').textContent = hasKey ? 'TMDB (rich metadata, active)' : 'IMDb via imdbapi.dev (free)';
   el('source-dot').style.background = hasKey ? 'var(--primary)' : 'var(--success)';
+}
+
+function renderTrash() {
+  const grid = el('trash-grid');
+  if (state.loading.trash) {
+    grid.innerHTML = '<div class="loading"><div class="spinner"></div><span>Loading…</span></div>';
+    return;
+  }
+  if (!state.trash.length) {
+    grid.innerHTML = '<div class="empty"><span>Trash is empty.</span></div>';
+    return;
+  }
+  grid.innerHTML = state.trash.map(m => movieCard(m, 'trash')).join('');
+}
+
+function updateTrashBadge() {
+  const badge = el('trash-count');
+  const count = state.trash.length;
+  badge.textContent = count;
+  badge.style.display = count > 0 ? '' : 'none';
 }
 
 // ── Modal ─────────────────────────────────────────────────────────────────────
@@ -329,6 +380,7 @@ function goToSection(name) {
   el(`section-${name}`)?.classList.remove('hidden');
   document.querySelector(`.nav-btn[data-section="${name}"]`)?.classList.add('active');
   if (name === 'suggestions' && !state.suggestions.length) loadSuggestions();
+  if (name === 'trash') loadTrash();
 }
 
 // ── Data loaders ──────────────────────────────────────────────────────────────
@@ -366,18 +418,35 @@ async function loadSettings() {
   } catch { /* ignore */ }
 }
 
+async function loadTrash() {
+  state.loading.trash = true;
+  renderTrash();
+  try {
+    state.trash = await api.getTrash();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+  state.loading.trash = false;
+  renderTrash();
+  updateTrashBadge();
+}
+
 // ── Remove movie ──────────────────────────────────────────────────────────────
 
 async function removeMovie(id) {
   const movie = state.movies.find(m => m.imdbId === id || m.tmdbId?.toString() === id);
-  if (!confirm(`Remove "${movie?.title || 'this movie'}" from your watched list?`)) return;
   try {
     await api.removeMovie(id);
     state.movies = state.movies.filter(m => m.imdbId !== id && m.tmdbId?.toString() !== id);
+    if (movie) {
+      movie.deletedAt = new Date().toISOString();
+      state.trash.unshift(movie);
+    }
     renderMovies();
     updateFilterOptions();
     renderSidebar();
-    showToast('Movie removed', 'success');
+    updateTrashBadge();
+    showToast('Moved to Trash', 'success');
   } catch (err) {
     showToast(err.message, 'error');
   }
@@ -439,14 +508,55 @@ function init() {
   el('filter-rating').addEventListener('change', e => { state.filters.minRating = e.target.value; loadMovies(); });
   el('filter-sort').addEventListener('change', e => { state.filters.sort = e.target.value; loadMovies(); });
 
-  // Remove movie
-  el('movies-grid').addEventListener('click', e => {
-    const btn = e.target.closest('.btn-remove');
-    if (btn) removeMovie(btn.dataset.id);
+  // Remove movie (X button on poster)
+  el('movies-grid').addEventListener('click', async e => {
+    const removeBtn = e.target.closest('.btn-remove-x');
+    if (removeBtn) { removeMovie(removeBtn.dataset.id); return; }
+    if (!e.target.closest('button, .card-heart')) {
+      const imdbId = e.target.closest('.movie-card')?.dataset.imdb;
+      if (imdbId) { window.open(`https://www.imdb.com/title/${imdbId}/`, '_blank'); return; }
+    }
+
+    // Heart rating on card
+    const heart = e.target.closest('.card-heart');
+    if (heart) {
+      const heartsEl = heart.closest('.card-hearts');
+      const id = heartsEl?.dataset.id;
+      if (!id) return;
+      const val = parseInt(heart.dataset.val);
+      const movie = state.movies.find(m => (m.imdbId || m.tmdbId?.toString()) === id);
+      if (!movie) return;
+      const newVal = movie.hearts === val ? 0 : val;
+      try {
+        await api.setHearts(id, newVal);
+        movie.hearts = newVal;
+        // Re-render just the hearts row in-place for instant feedback
+        heartsEl.querySelectorAll('.card-heart').forEach(h => {
+          h.classList.toggle('filled', parseInt(h.dataset.val) <= newVal);
+        });
+        if (state.filters.minHearts > 0) renderMovies(); // reapply filter
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+  });
+
+  // Heart filter (in filter bar)
+  el('heart-filter').addEventListener('click', e => {
+    const h = e.target.closest('.hf-heart');
+    if (!h) return;
+    const val = parseInt(h.dataset.val);
+    state.filters.minHearts = state.filters.minHearts === val ? 0 : val;
+    renderHeartFilter();
+    renderMovies();
   });
 
   // Add from suggestions
   el('suggestions-grid').addEventListener('click', async e => {
+    if (!e.target.closest('button')) {
+      const imdbId = e.target.closest('.movie-card')?.dataset.imdb;
+      if (imdbId) { window.open(`https://www.imdb.com/title/${imdbId}/`, '_blank'); return; }
+    }
     const btn = e.target.closest('.btn-add-suggestion');
     if (!btn) return;
     btn.disabled = true;
@@ -466,6 +576,66 @@ function init() {
     } catch (err) {
       btn.disabled = false;
       btn.textContent = '+ Watched';
+      showToast(err.message, 'error');
+    }
+  });
+
+  // Trash grid (restore / delete forever)
+  el('trash-grid').addEventListener('click', async e => {
+    if (!e.target.closest('button')) {
+      const imdbId = e.target.closest('.movie-card')?.dataset.imdb;
+      if (imdbId) { window.open(`https://www.imdb.com/title/${imdbId}/`, '_blank'); return; }
+    }
+    const restoreBtn = e.target.closest('.btn-restore');
+    if (restoreBtn) {
+      const id = restoreBtn.dataset.id;
+      const movie = state.trash.find(m => (m.imdbId || m.tmdbId?.toString()) === id);
+      try {
+        await api.restoreMovie(id);
+        state.trash = state.trash.filter(m => (m.imdbId || m.tmdbId?.toString()) !== id);
+        if (movie) {
+          delete movie.deletedAt;
+          state.movies.unshift(movie);
+          updateFilterOptions();
+          renderSidebar();
+        }
+        renderTrash();
+        updateTrashBadge();
+        showToast(`"${movie?.title || 'Movie'}" restored!`, 'success');
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+      return;
+    }
+
+    const deleteBtn = e.target.closest('.btn-delete-forever');
+    if (deleteBtn) {
+      const id = deleteBtn.dataset.id;
+      const movie = state.trash.find(m => (m.imdbId || m.tmdbId?.toString()) === id);
+      if (!confirm(`Permanently delete "${movie?.title || 'this movie'}"? This cannot be undone.`)) return;
+      try {
+        await api.deleteForever(id);
+        state.trash = state.trash.filter(m => (m.imdbId || m.tmdbId?.toString()) !== id);
+        renderTrash();
+        updateTrashBadge();
+        showToast('Deleted permanently', 'success');
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+  });
+
+  // Empty trash
+  el('btn-empty-trash').addEventListener('click', async () => {
+    if (!state.trash.length) return;
+    if (!confirm(`Permanently delete all ${state.trash.length} movie${state.trash.length > 1 ? 's' : ''} in Trash? This cannot be undone.`)) return;
+    try {
+      await api.emptyTrash();
+      state.trash = [];
+      renderTrash();
+      updateTrashBadge();
+      showToast('Trash emptied', 'success');
+    } catch (err) {
       showToast(err.message, 'error');
     }
   });
@@ -509,7 +679,7 @@ function init() {
   });
 
   // Initial data load
-  Promise.all([loadMovies(), loadSettings()]);
+  Promise.all([loadMovies(), loadSettings(), loadTrash()]);
 }
 
 init();

@@ -10,6 +10,7 @@ const ROOT = __dirname;
 const DATA = path.join(ROOT, 'data');
 const MOVIES_FILE = path.join(DATA, 'movies.json');
 const KEY_FILE = path.join(DATA, 'key.json');
+const POSTERS_DIR = path.join(DATA, 'posters');
 
 app.use(express.json());
 app.use(express.static(path.join(ROOT, 'public')));
@@ -30,6 +31,22 @@ function getSettings() {
 function saveSettings(obj) {
   fs.mkdirSync(DATA, { recursive: true });
   fs.writeFileSync(KEY_FILE, JSON.stringify(obj, null, 2));
+}
+
+async function cachePoster(movieId, url) {
+  if (!url || !movieId) return null;
+  fs.mkdirSync(POSTERS_DIR, { recursive: true });
+  for (const ext of ['jpg', 'png', 'webp']) {
+    if (fs.existsSync(path.join(POSTERS_DIR, `${movieId}.${ext}`))) return `/api/posters/${movieId}`;
+  }
+  try {
+    const r = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    if (!r.ok) return null;
+    const ct = r.headers.get('content-type') || 'image/jpeg';
+    const ext = ct.includes('png') ? 'png' : ct.includes('webp') ? 'webp' : 'jpg';
+    fs.writeFileSync(path.join(POSTERS_DIR, `${movieId}.${ext}`), Buffer.from(await r.arrayBuffer()));
+    return `/api/posters/${movieId}`;
+  } catch { return null; }
 }
 
 // ── IMDB (imdbapi.dev + IMDB suggestion API) ──────────────────────────────────
@@ -120,7 +137,8 @@ const TMDB_GENRE_REVERSE = Object.fromEntries(
 async function tmdbFetch(endpoint, apiKey, params = {}) {
   const qs = new URLSearchParams({ api_key: apiKey, language: 'en-US', ...params });
   const r = await fetch(`${TMDB_BASE}${endpoint}?${qs}`, { signal: AbortSignal.timeout(8000) });
-  if (!r.ok) throw new Error(`TMDB error ${r.status}: ${await r.text().catch(() => '')}`);
+  if (r.status === 401) throw new Error('You must grant a valid API key for TMDB.');
+  if (!r.ok) throw new Error(`TMDB error ${r.status}`);
   return r.json();
 }
 
@@ -386,9 +404,18 @@ app.get('/api/movie-details/:id', async (req, res) => {
   }
 });
 
+app.get('/api/posters/:id', (req, res) => {
+  if (!/^[a-zA-Z0-9_-]+$/.test(req.params.id)) return res.status(400).end();
+  for (const ext of ['jpg', 'png', 'webp']) {
+    const p = path.join(POSTERS_DIR, `${req.params.id}.${ext}`);
+    if (fs.existsSync(p)) return res.sendFile(p);
+  }
+  res.status(404).end();
+});
+
 app.get('/api/movies', (req, res) => {
   const { type, year, genre, minRating, sort = 'addedAt', order = 'desc' } = req.query;
-  let list = getMovies();
+  let list = getMovies().filter(m => !m.deletedAt);
   if (type && type !== 'all') list = list.filter(m => m.type === type);
   if (year) list = list.filter(m => m.year === parseInt(year));
   if (genre) list = list.filter(m => m.genres?.includes(genre));
@@ -423,6 +450,8 @@ app.post('/api/movies', async (req, res) => {
     }
 
     const movie = { ...details, addedAt: new Date().toISOString() };
+    const localPoster = await cachePoster(details.imdbId || details.tmdbId?.toString(), details.poster);
+    if (localPoster) movie.poster = localPoster;
     movies.unshift(movie);
     saveMovies(movies);
     res.json(movie);
@@ -435,6 +464,32 @@ app.post('/api/movies', async (req, res) => {
 app.delete('/api/movies/:id', (req, res) => {
   const { id } = req.params;
   const movies = getMovies();
+  const movie = movies.find(m => m.imdbId === id || m.tmdbId?.toString() === id);
+  if (!movie) return res.status(404).json({ error: 'Not found' });
+  movie.deletedAt = new Date().toISOString();
+  saveMovies(movies);
+  res.json({ ok: true });
+});
+
+app.get('/api/trash', (req, res) => {
+  const trash = getMovies().filter(m => m.deletedAt);
+  trash.sort((a, b) => new Date(b.deletedAt) - new Date(a.deletedAt));
+  res.json(trash);
+});
+
+app.patch('/api/movies/:id/restore', (req, res) => {
+  const { id } = req.params;
+  const movies = getMovies();
+  const movie = movies.find(m => m.imdbId === id || m.tmdbId?.toString() === id);
+  if (!movie) return res.status(404).json({ error: 'Not found' });
+  delete movie.deletedAt;
+  saveMovies(movies);
+  res.json({ ok: true });
+});
+
+app.delete('/api/trash/:id', (req, res) => {
+  const { id } = req.params;
+  const movies = getMovies();
   const idx = movies.findIndex(m => m.imdbId === id || m.tmdbId?.toString() === id);
   if (idx === -1) return res.status(404).json({ error: 'Not found' });
   movies.splice(idx, 1);
@@ -442,8 +497,27 @@ app.delete('/api/movies/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+app.delete('/api/trash', (req, res) => {
+  saveMovies(getMovies().filter(m => !m.deletedAt));
+  res.json({ ok: true });
+});
+
+app.patch('/api/movies/:id/hearts', (req, res) => {
+  const { id } = req.params;
+  const { hearts } = req.body;
+  if (typeof hearts !== 'number' || hearts < 0 || hearts > 5) {
+    return res.status(400).json({ error: 'hearts must be 0–5' });
+  }
+  const movies = getMovies();
+  const movie = movies.find(m => m.imdbId === id || m.tmdbId?.toString() === id);
+  if (!movie) return res.status(404).json({ error: 'Not found' });
+  movie.hearts = Math.round(hearts);
+  saveMovies(movies);
+  res.json({ ok: true, hearts: movie.hearts });
+});
+
 app.get('/api/suggestions', async (req, res) => {
-  const watched = getMovies();
+  const watched = getMovies().filter(m => !m.deletedAt);
   if (!watched.length) return res.json([]);
   try {
     const settings = getSettings();
