@@ -9,6 +9,7 @@ const PORT = 3737;
 const ROOT = __dirname;
 const DATA = path.join(ROOT, 'data');
 const MOVIES_FILE = path.join(DATA, 'movies.json');
+const WISHLIST_FILE = path.join(DATA, 'wishlist.json');
 const KEY_FILE = path.join(DATA, 'key.json');
 const POSTERS_DIR = path.join(DATA, 'posters');
 
@@ -24,6 +25,13 @@ function getMovies() {
 function saveMovies(list) {
   fs.mkdirSync(DATA, { recursive: true });
   fs.writeFileSync(MOVIES_FILE, JSON.stringify(list, null, 2));
+}
+function getWishlist() {
+  try { return JSON.parse(fs.readFileSync(WISHLIST_FILE, 'utf8')); } catch { return []; }
+}
+function saveWishlist(list) {
+  fs.mkdirSync(DATA, { recursive: true });
+  fs.writeFileSync(WISHLIST_FILE, JSON.stringify(list, null, 2));
 }
 function getSettings() {
   try { return JSON.parse(fs.readFileSync(KEY_FILE, 'utf8')); } catch { return {}; }
@@ -156,6 +164,27 @@ async function tmdbSearch(query, apiKey) {
       poster: r.poster_path ? `${TMDB_IMG}${r.poster_path}` : null,
       cast: ''
     }));
+}
+
+async function tmdbFindByImdbId(imdbId, apiKey) {
+  try {
+    const data = await tmdbFetch(`/find/${imdbId}`, apiKey, { external_source: 'imdb_id' });
+    const movie = (data.movie_results || [])[0];
+    const tv = (data.tv_results || [])[0];
+    if (movie) return { id: movie.id, isTv: false };
+    if (tv) return { id: tv.id, isTv: true };
+    return null;
+  } catch { return null; }
+}
+
+async function tmdbWatchProviders(tmdbId, isTv, apiKey) {
+  try {
+    const ep = isTv ? `/tv/${tmdbId}` : `/movie/${tmdbId}`;
+    const data = await tmdbFetch(`${ep}/watch/providers`, apiKey);
+    const PLATFORM_IDS = { 8: 'Netflix', 337: 'Disney+', 119: 'Amazon', 350: 'Apple' };
+    const allProviders = Object.values(data.results || {}).flatMap(c => c.flatrate || []);
+    return [...new Set(allProviders.map(p => PLATFORM_IDS[p.provider_id]).filter(Boolean))];
+  } catch { return []; }
 }
 
 async function tmdbDetails(tmdbId, mediaType, apiKey) {
@@ -350,17 +379,21 @@ async function suggestTmdb(watched, apiKey) {
   }
 
   const detailResults = await Promise.allSettled(
-    pool.slice(0, 40).map(r =>
-      tmdbDetails(r.id, r.media_type === 'tv' ? 'tvSeries' : 'movie', apiKey)
-    )
+    pool.slice(0, 40).map(r => {
+      const isTv = r.media_type === 'tv';
+      return Promise.all([
+        tmdbDetails(r.id, isTv ? 'tvSeries' : 'movie', apiKey),
+        tmdbWatchProviders(r.id, isTv, apiKey)
+      ]);
+    })
   );
 
   return detailResults
     .map(r => {
       if (r.status !== 'fulfilled') return null;
-      const det = r.value;
+      const [det, platforms] = r.value;
       const s = score(det, profile, watchedIds);
-      return s ? { ...det, ...s } : null;
+      return s ? { ...det, platforms, ...s } : null;
     })
     .filter(Boolean)
     .sort((a, b) => b.points - a.points)
@@ -514,6 +547,118 @@ app.patch('/api/movies/:id/hearts', (req, res) => {
   movie.hearts = Math.round(hearts);
   saveMovies(movies);
   res.json({ ok: true, hearts: movie.hearts });
+});
+
+// ── Wishlist ──────────────────────────────────────────────────────────────────
+
+app.get('/api/wishlist', (req, res) => res.json(getWishlist()));
+
+app.post('/api/wishlist', async (req, res) => {
+  const { imdbId, tmdbId, type } = req.body;
+  if (!imdbId && !tmdbId) return res.status(400).json({ error: 'imdbId or tmdbId required' });
+  try {
+    const wishlist = getWishlist();
+    if (imdbId && wishlist.find(m => m.imdbId === imdbId))
+      return res.status(409).json({ error: 'Already in your wish list' });
+    if (tmdbId && wishlist.find(m => m.tmdbId === tmdbId))
+      return res.status(409).json({ error: 'Already in your wish list' });
+
+    const settings = getSettings();
+    let details;
+    if (imdbId?.startsWith('tt')) {
+      details = await imdbDetails(imdbId);
+    } else if (tmdbId && settings.tmdb) {
+      details = await tmdbDetails(tmdbId, type || 'movie', settings.tmdb);
+    } else {
+      return res.status(400).json({ error: 'Cannot fetch details. Add a TMDB API key in Settings.' });
+    }
+
+    let platforms = [];
+    let resolvedTmdbId = details.tmdbId;
+    let resolvedIsTv = details.type === 'tvSeries' || details.type === 'tvMiniSeries' || details.type === 'tvMovie';
+    if (settings.tmdb && !resolvedTmdbId && details.imdbId) {
+      const found = await tmdbFindByImdbId(details.imdbId, settings.tmdb);
+      if (found) { resolvedTmdbId = found.id; resolvedIsTv = found.isTv; }
+    }
+    if (settings.tmdb && resolvedTmdbId) {
+      platforms = await tmdbWatchProviders(resolvedTmdbId, resolvedIsTv, settings.tmdb);
+    }
+    const movie = { ...details, tmdbId: resolvedTmdbId || details.tmdbId, platforms, addedAt: new Date().toISOString() };
+    const localPoster = await cachePoster(details.imdbId || resolvedTmdbId?.toString(), details.poster);
+    if (localPoster) movie.poster = localPoster;
+    wishlist.unshift(movie);
+    saveWishlist(wishlist);
+    res.json(movie);
+  } catch (err) {
+    console.error('Add wishlist:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/wishlist/refresh-platforms', async (req, res) => {
+  const settings = getSettings();
+  if (!settings.tmdb) return res.json({ updated: 0 });
+  const wishlist = getWishlist();
+  let updated = 0;
+  for (const m of wishlist) {
+    if ((m.platforms || []).length > 0) continue;
+    let tmdbId = m.tmdbId;
+    let isTv = m.type === 'tvSeries' || m.type === 'tvMiniSeries' || m.type === 'tvMovie';
+    if (!tmdbId && m.imdbId) {
+      const found = await tmdbFindByImdbId(m.imdbId, settings.tmdb);
+      if (found) { tmdbId = found.id; isTv = found.isTv; if (!m.tmdbId) m.tmdbId = tmdbId; }
+    }
+    if (tmdbId) {
+      const platforms = await tmdbWatchProviders(tmdbId, isTv, settings.tmdb);
+      m.platforms = platforms;
+      updated++;
+    }
+  }
+  saveWishlist(wishlist);
+  res.json({ updated });
+});
+
+app.delete('/api/wishlist/:id', (req, res) => {
+  const { id } = req.params;
+  const wishlist = getWishlist();
+  const idx = wishlist.findIndex(m => m.imdbId === id || m.tmdbId?.toString() === id);
+  if (idx === -1) return res.status(404).json({ error: 'Not found' });
+  wishlist.splice(idx, 1);
+  saveWishlist(wishlist);
+  res.json({ ok: true });
+});
+
+app.patch('/api/wishlist/:id/hearts', (req, res) => {
+  const { id } = req.params;
+  const { hearts } = req.body;
+  if (typeof hearts !== 'number' || hearts < 0 || hearts > 5)
+    return res.status(400).json({ error: 'hearts must be 0–5' });
+  const wishlist = getWishlist();
+  const movie = wishlist.find(m => m.imdbId === id || m.tmdbId?.toString() === id);
+  if (!movie) return res.status(404).json({ error: 'Not found' });
+  movie.hearts = Math.round(hearts);
+  saveWishlist(wishlist);
+  res.json({ ok: true, hearts: movie.hearts });
+});
+
+app.patch('/api/wishlist/:id/watched', (req, res) => {
+  const { id } = req.params;
+  const wishlist = getWishlist();
+  const idx = wishlist.findIndex(m => m.imdbId === id || m.tmdbId?.toString() === id);
+  if (idx === -1) return res.status(404).json({ error: 'Not found' });
+  const movie = wishlist[idx];
+  const movies = getMovies();
+  const active = movies.filter(m => !m.deletedAt);
+  if ((movie.imdbId && active.find(m => m.imdbId === movie.imdbId)) ||
+      (movie.tmdbId && active.find(m => m.tmdbId === movie.tmdbId)))
+    return res.status(409).json({ error: 'Already in your watched list' });
+  wishlist.splice(idx, 1);
+  const watched = { ...movie, addedAt: new Date().toISOString() };
+  delete watched.platforms;
+  movies.unshift(watched);
+  saveMovies(movies);
+  saveWishlist(wishlist);
+  res.json(watched);
 });
 
 app.get('/api/suggestions', async (req, res) => {
