@@ -1,8 +1,15 @@
-# Cinelog v2.0
+# Cinelog v2.1
 
 A personal movie and book library app that runs locally in your browser.
 
 ![Cinelog](cinelog_app_icon.svg)
+
+## What's new in v2.1
+
+- **Notes** — add a private note and a "Suggested by" name to any movie or book; tap 💬 on any card; autocomplete suggests names you've used before
+- **Rewatch / Reread flag** — mark movies and books you want to revisit with 🚩; filter your library to show only flagged items
+- **Streaming Region** — choose your country in Settings so platform badges (Netflix, Disney+, Amazon, Apple) reflect what's actually available near you
+- **Uniform filter bar** — all filter elements are the same height for a consistent look
 
 ## What's new in v2.0
 
@@ -19,12 +26,16 @@ A personal movie and book library app that runs locally in your browser.
 ### Movies
 - **My Movies** — add by searching IMDb or by IMDb/TMDB ID; track everything you've watched
 - **Heart ratings (1–5)** — rate each title directly on the card; filter by minimum rating
+- **Notes & Suggested by** — private notes per movie; remember who recommended it
+- **Rewatch flag** — mark movies for a future rewatch; filter to see only flagged ones
 - **Wish List** — save movies to watch later; streaming platform badges; group by platform view
 - **Suggestions** — personalised picks based on your genres, directors, and actors; platform filter
 - **IMDb links** — click any card to open on IMDb
 
 ### Books
 - **My Books** — search Google Books (fallback: Open Library); covers cached locally
+- **Notes & Suggested by** — private notes per book; remember who recommended it
+- **Reread flag** — mark books for a future reread; filter to see only flagged ones
 - **Book Wish List** — queue books to read; mark as read to move to your library
 - **Book Suggestions** — NYT bestseller lists scored by your reading taste; falls back to Open Library trending if no NYT key is set
 - **Google Books links** — click any book card to open on Google Books
@@ -86,7 +97,7 @@ Both keys are free and optional. Add them in **Settings**.
 | `data/books-wishlist.json` | Your book wish list |
 | `data/posters/` | Cached movie poster images |
 | `data/book-covers/` | Cached book cover images |
-| `data/key.json` | API keys (TMDB, NYT) |
+| `data/key.json` | API keys and settings (TMDB, NYT, streaming region) |
 
 All data files are excluded from git — your library stays private.
 
@@ -101,6 +112,13 @@ All data files are excluded from git — your library stays private.
 ---
 
 ## Changelog
+
+### v2.1
+
+- Notes button (💬) on every movie and book card — stores a note and a "Suggested by" name; autocomplete from existing names
+- Rewatch / Reread flag (🚩) on every card — toggle on/off; filter bar button to show flagged items only
+- Streaming Region setting — pick your country; platform badges now show what's available in your region (requires TMDB key)
+- Filter bar height fix — heart filter and flag filter now match the height of search inputs and dropdowns
 
 ### v2.0
 
@@ -119,7 +137,7 @@ All data files are excluded from git — your library stays private.
 - Wish List tab with full CRUD, platform badges, group-by-platform view
 - Calendar tab with monthly grid and hover tooltips
 - Suggestions: full poster cards, platform badges, IMDb card links, type/genre/rating/platform filters
-- Streaming platform data from TMDB across all regions
+- Streaming platform data from TMDB
 - "Add to Wish List" button in the Add Movie modal alongside "Add to Watched"
 - Wishlist poster caching to disk; platform auto-refresh for existing entries
 

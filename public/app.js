@@ -20,6 +20,7 @@ const state = {
     order: "desc",
     q: "",
     minHearts: 0,
+    rewatch: false,
   },
   bookFilters: {
     genre: "",
@@ -28,7 +29,9 @@ const state = {
     order: "desc",
     q: "",
     minHearts: 0,
+    rewatch: false,
   },
+  notesPopup: { open: false, id: null, type: null },
   suggFilters: { type: "", genre: "", minRating: "", platform: "" },
   bookSuggFilters: { genre: "" },
   wishlist: [],
@@ -119,6 +122,20 @@ const api = {
   removeBook: (id) => api.del(`/api/books/${encodeURIComponent(id)}`),
   setBookHearts: (id, hearts) =>
     api.patch(`/api/books/${encodeURIComponent(id)}/hearts`, { hearts }),
+  setMovieNotes: (id, notes, suggestedBy) =>
+    api.patch(`/api/movies/${encodeURIComponent(id)}/notes`, {
+      notes,
+      suggestedBy,
+    }),
+  setMovieRewatch: (id) =>
+    api.patch(`/api/movies/${encodeURIComponent(id)}/rewatch`, {}),
+  setBookNotes: (id, notes, suggestedBy) =>
+    api.patch(`/api/books/${encodeURIComponent(id)}/notes`, {
+      notes,
+      suggestedBy,
+    }),
+  setBookReread: (id) =>
+    api.patch(`/api/books/${encodeURIComponent(id)}/reread`, {}),
   getBooksTrash: () => api.get("/api/books-trash"),
   restoreBook: (id) =>
     api.patch(`/api/books/${encodeURIComponent(id)}/restore`, {}),
@@ -225,10 +242,17 @@ function movieCard(m, mode) {
 
   const heartsHtml =
     !isSuggestion && !isTrash && !isWishlist
-      ? `
-    <div class="card-hearts" data-id="${movieId}">
-      ${[5, 4, 3, 2, 1].map((n) => `<span class="card-heart${(m.hearts || 0) >= n ? " filled" : ""}" data-val="${n}">♥</span>`).join("")}
-    </div>`
+      ? `<div class="card-rating-row">
+          <div class="card-hearts" data-id="${movieId}">
+            ${[5, 4, 3, 2, 1].map((n) => `<span class="card-heart${(m.hearts || 0) >= n ? " filled" : ""}" data-val="${n}">♥</span>`).join("")}
+          </div>
+          <button class="btn-notes${m.notes || m.suggestedBy ? " has-notes" : ""}" data-id="${movieId}" title="Notes">💬</button>
+        </div>`
+      : "";
+
+  const rewatchFlagHtml =
+    !isSuggestion && !isTrash && !isWishlist
+      ? `<button class="btn-rewatch-flag${m.rewatch ? " active" : ""}" data-id="${movieId}" title="${m.rewatch ? "Marked for rewatch — click to unmark" : "Mark for rewatch"}">🚩</button>`
       : "";
 
   const action = isSuggestion
@@ -247,7 +271,7 @@ function movieCard(m, mode) {
       : isTrash
         ? `<div class="trash-actions">
         <button class="btn-small btn-restore" data-id="${movieId}">↩ Restore</button>
-        <button class="btn-small btn-delete-forever" data-id="${movieId}">✕ Delete Forever</button>
+        <button class="btn-small btn-delete-forever" data-id="${movieId}">✕ Permanently Delete</button>
       </div>`
         : "";
 
@@ -266,6 +290,7 @@ function movieCard(m, mode) {
         </button>`
             : ""
         }
+        ${rewatchFlagHtml}
       </div>
       <div class="card-body">
         <h3 class="card-title">${esc(m.title)}</h3>
@@ -299,10 +324,17 @@ function bookCard(b, mode) {
     .join("");
   const showHearts = !isTrash && !isSuggestion && !isWishlist;
   const heartsHtml = showHearts
-    ? `<div class="card-hearts" data-id="${bookId}">
-        ${[5, 4, 3, 2, 1].map((n) => `<span class="card-heart${(b.hearts || 0) >= n ? " filled" : ""}" data-val="${n}">♥</span>`).join("")}
+    ? `<div class="card-rating-row">
+        <div class="card-hearts" data-id="${bookId}">
+          ${[5, 4, 3, 2, 1].map((n) => `<span class="card-heart${(b.hearts || 0) >= n ? " filled" : ""}" data-val="${n}">♥</span>`).join("")}
+        </div>
+        <button class="btn-notes${b.notes || b.suggestedBy ? " has-notes" : ""}" data-id="${bookId}" title="Notes">💬</button>
       </div>`
     : "";
+  const rewatchFlagHtml =
+    !isTrash && !isSuggestion && !isWishlist
+      ? `<button class="btn-rewatch-flag${b.rewatch ? " active" : ""}" data-id="${bookId}" title="${b.rewatch ? "Marked for reread — click to unmark" : "Mark for reread"}">🚩</button>`
+      : "";
   let action = "";
   if (isTrash) {
     action = `<div class="trash-actions">
@@ -313,10 +345,10 @@ function bookCard(b, mode) {
     const isbn = esc(b.isbn || "");
     const gbId = esc(b.googleBooksId || "");
     const olId = esc(b.openLibraryId || "");
-    action = `<div class="card-actions">
+    action = `<div class="card-footer"><div class="sugg-actions">
         <button class="btn-small btn-add-book-suggestion" data-isbn="${isbn}" data-google-books-id="${gbId}" data-open-library-id="${olId}">+ Read</button>
         <button class="btn-small btn-sugg-book-wishlist" data-isbn="${isbn}" data-google-books-id="${gbId}" data-open-library-id="${olId}">☆ List</button>
-      </div>`;
+      </div></div>`;
   } else if (isWishlist) {
     action = `<div class="card-actions">
         <button class="btn-small btn-mark-read" data-id="${bookId}">✓ Mark as Read</button>
@@ -343,6 +375,7 @@ function bookCard(b, mode) {
           <span class="type-badge book-badge">Book</span>
         </div>
         ${removeBtn}
+        ${rewatchFlagHtml}
       </div>
       <div class="card-body">
         <h3 class="card-title">${esc(b.title)}</h3>
@@ -378,6 +411,7 @@ function renderBooks() {
   }
   if (f.minHearts > 0)
     list = list.filter((b) => (b.hearts || 0) >= f.minHearts);
+  if (f.rewatch) list = list.filter((b) => b.rewatch);
   if (!list.length) {
     grid.innerHTML = state.books.length
       ? '<div class="empty"><span>No books match your filters.</span></div>'
@@ -464,6 +498,9 @@ function renderMovies() {
   }
   if (state.filters.minHearts > 0) {
     list = list.filter((m) => (m.hearts || 0) >= state.filters.minHearts);
+  }
+  if (state.filters.rewatch) {
+    list = list.filter((m) => m.rewatch);
   }
   if (!list.length) {
     grid.innerHTML = state.movies.length
@@ -633,6 +670,7 @@ function renderSettings() {
     ? "var(--primary)"
     : "var(--success)";
   el("setting-nyt").value = state.settings.nyt || "";
+  el("setting-country").value = state.settings.country || "US";
   renderTabsToggle();
 }
 
@@ -1015,6 +1053,76 @@ async function confirmAddToWishlist(details) {
   } catch (err) {
     btn.disabled = false;
     btn.textContent = "☆ Add to Wish List";
+    showToast(err.message, "error");
+  }
+}
+
+// ── Notes popup ───────────────────────────────────────────────────────────────
+
+function getSuggestedByNames() {
+  const names = new Set();
+  for (const m of state.movies) if (m.suggestedBy) names.add(m.suggestedBy);
+  for (const b of state.books) if (b.suggestedBy) names.add(b.suggestedBy);
+  return [...names].sort((a, b) => a.localeCompare(b));
+}
+
+function openNotesPopup(id, type) {
+  const item =
+    type === "book"
+      ? state.books.find((b) => (b.googleBooksId || b.openLibraryId) === id)
+      : state.movies.find((m) => (m.imdbId || m.tmdbId?.toString()) === id);
+  if (!item) return;
+  state.notesPopup = { open: true, id, type };
+  el("notes-suggested-by").value = item.suggestedBy || "";
+  el("notes-text").value = item.notes || "";
+  el("notes-popup-title").textContent = item.title;
+  el("notes-suggested-suggestions").classList.add("hidden");
+  el("notes-overlay").classList.remove("hidden");
+  setTimeout(() => el("notes-suggested-by").focus(), 50);
+}
+
+function closeNotesPopup() {
+  state.notesPopup.open = false;
+  el("notes-suggested-suggestions").classList.add("hidden");
+  el("notes-overlay").classList.add("hidden");
+}
+
+async function saveAndCloseNotes() {
+  if (!state.notesPopup.open) return;
+  const { id, type } = state.notesPopup;
+  const suggestedBy = el("notes-suggested-by").value.trim();
+  const notes = el("notes-text").value.trim();
+  const hasContent = Boolean(notes || suggestedBy);
+  closeNotesPopup();
+  try {
+    if (type === "book") {
+      await api.setBookNotes(id, notes, suggestedBy);
+      const book = state.books.find(
+        (b) => (b.googleBooksId || b.openLibraryId) === id,
+      );
+      if (book) {
+        book.notes = notes;
+        book.suggestedBy = suggestedBy;
+      }
+      const btn = document.querySelector(
+        `#books-grid .btn-notes[data-id="${id}"]`,
+      );
+      if (btn) btn.classList.toggle("has-notes", hasContent);
+    } else {
+      await api.setMovieNotes(id, notes, suggestedBy);
+      const movie = state.movies.find(
+        (m) => (m.imdbId || m.tmdbId?.toString()) === id,
+      );
+      if (movie) {
+        movie.notes = notes;
+        movie.suggestedBy = suggestedBy;
+      }
+      const btn = document.querySelector(
+        `#movies-grid .btn-notes[data-id="${id}"]`,
+      );
+      if (btn) btn.classList.toggle("has-notes", hasContent);
+    }
+  } catch (err) {
     showToast(err.message, "error");
   }
 }
@@ -1433,6 +1541,43 @@ function init() {
   el("modal-close").addEventListener("click", closeModal);
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && state.modal.open) closeModal();
+    if (e.key === "Escape" && state.notesPopup.open) saveAndCloseNotes();
+  });
+
+  // Notes popup: save on click outside
+  el("notes-overlay").addEventListener("click", (e) => {
+    if (e.target === el("notes-overlay")) saveAndCloseNotes();
+  });
+
+  // Notes popup: suggested-by autocomplete
+  el("notes-suggested-by").addEventListener("input", (e) => {
+    const val = e.target.value;
+    const sugg = el("notes-suggested-suggestions");
+    if (!val.trim()) {
+      sugg.classList.add("hidden");
+      return;
+    }
+    const lv = val.toLowerCase();
+    const matches = getSuggestedByNames().filter(
+      (n) => n.toLowerCase().startsWith(lv) && n.toLowerCase() !== lv,
+    );
+    if (!matches.length) {
+      sugg.classList.add("hidden");
+      return;
+    }
+    sugg.innerHTML = matches
+      .slice(0, 5)
+      .map((n) => `<div class="notes-autocomplete-item">${esc(n)}</div>`)
+      .join("");
+    sugg.classList.remove("hidden");
+  });
+
+  el("notes-suggested-suggestions").addEventListener("click", (e) => {
+    const item = e.target.closest(".notes-autocomplete-item");
+    if (!item) return;
+    el("notes-suggested-by").value = item.textContent;
+    el("notes-suggested-suggestions").classList.add("hidden");
+    el("notes-text").focus();
   });
 
   // Search input
@@ -1504,6 +1649,34 @@ function init() {
       removeMovie(removeBtn.dataset.id);
       return;
     }
+
+    const rewatchBtn = e.target.closest(".btn-rewatch-flag");
+    if (rewatchBtn) {
+      const id = rewatchBtn.dataset.id;
+      const movie = state.movies.find(
+        (m) => (m.imdbId || m.tmdbId?.toString()) === id,
+      );
+      if (!movie) return;
+      try {
+        const result = await api.setMovieRewatch(id);
+        movie.rewatch = result.rewatch;
+        rewatchBtn.classList.toggle("active", Boolean(movie.rewatch));
+        rewatchBtn.title = movie.rewatch
+          ? "Marked for rewatch — click to unmark"
+          : "Mark for rewatch";
+        if (state.filters.rewatch) renderMovies();
+      } catch (err) {
+        showToast(err.message, "error");
+      }
+      return;
+    }
+
+    const notesBtn = e.target.closest(".btn-notes");
+    if (notesBtn) {
+      openNotesPopup(notesBtn.dataset.id, "movie");
+      return;
+    }
+
     if (!e.target.closest("button, .card-heart")) {
       const imdbId = e.target.closest(".movie-card")?.dataset.imdb;
       if (imdbId) {
@@ -1545,6 +1718,13 @@ function init() {
     const val = parseInt(h.dataset.val);
     state.filters.minHearts = state.filters.minHearts === val ? 0 : val;
     renderHeartFilter();
+    renderMovies();
+  });
+
+  // Flag filter (movies)
+  el("flag-filter-movies").addEventListener("click", () => {
+    state.filters.rewatch = !state.filters.rewatch;
+    el("flag-filter-movies").classList.toggle("active", state.filters.rewatch);
     renderMovies();
   });
 
@@ -1931,6 +2111,16 @@ function init() {
     }
   });
 
+  el("btn-save-country").addEventListener("click", async () => {
+    const country = el("setting-country").value;
+    try {
+      state.settings = await api.saveSettings({ country });
+      showToast("Streaming region saved", "success");
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  });
+
   // Wish List: group by platform toggle
   el("btn-group-platform").addEventListener("click", () => {
     state.wishlistGroupByPlatform = !state.wishlistGroupByPlatform;
@@ -2291,6 +2481,16 @@ function init() {
     renderBooks();
   });
 
+  // Flag filter (books)
+  el("flag-filter-books").addEventListener("click", () => {
+    state.bookFilters.rewatch = !state.bookFilters.rewatch;
+    el("flag-filter-books").classList.toggle(
+      "active",
+      state.bookFilters.rewatch,
+    );
+    renderBooks();
+  });
+
   // Books: grid interactions
   el("books-grid").addEventListener("click", async (e) => {
     const removeBtn = e.target.closest(".btn-remove-x");
@@ -2298,6 +2498,34 @@ function init() {
       removeBook(removeBtn.dataset.id);
       return;
     }
+
+    const rewatchBtn = e.target.closest(".btn-rewatch-flag");
+    if (rewatchBtn) {
+      const id = rewatchBtn.dataset.id;
+      const book = state.books.find(
+        (b) => (b.googleBooksId || b.openLibraryId) === id,
+      );
+      if (!book) return;
+      try {
+        const result = await api.setBookReread(id);
+        book.rewatch = result.rewatch;
+        rewatchBtn.classList.toggle("active", Boolean(book.rewatch));
+        rewatchBtn.title = book.rewatch
+          ? "Marked for reread — click to unmark"
+          : "Mark for reread";
+        if (state.bookFilters.rewatch) renderBooks();
+      } catch (err) {
+        showToast(err.message, "error");
+      }
+      return;
+    }
+
+    const notesBtn = e.target.closest(".btn-notes");
+    if (notesBtn) {
+      openNotesPopup(notesBtn.dataset.id, "book");
+      return;
+    }
+
     if (!e.target.closest("button, .card-heart")) {
       const card = e.target.closest(".movie-card");
       if (card?.dataset.googleUrl) {

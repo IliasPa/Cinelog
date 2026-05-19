@@ -261,7 +261,7 @@ nav {
   justify-content: flex-end;
   align-items: center;
   gap: 1px;
-  padding: 5px 8px;
+  padding: 7px 8px;
   background: var(--surface2);
   border: 1px solid var(--border2);
   border-radius: var(--radius-sm);
@@ -520,6 +520,77 @@ nav {
   border-color: var(--error);
 }
 
+/* ── Rewatch flag button (hover reveal, top-left of poster) ─────────────────── */
+.btn-rewatch-flag {
+  position: absolute;
+  top: 7px;
+  left: 7px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1.5px solid rgba(255, 255, 255, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.3;
+  filter: grayscale(1);
+  transition:
+    opacity 0.18s,
+    filter 0.18s,
+    background 0.18s;
+  z-index: 3;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0;
+}
+.movie-card:hover .btn-rewatch-flag {
+  opacity: 0.75;
+  filter: grayscale(0.3);
+}
+.btn-rewatch-flag.active {
+  opacity: 1;
+  filter: grayscale(0);
+}
+.btn-rewatch-flag:hover {
+  opacity: 1 !important;
+  filter: grayscale(0) !important;
+}
+
+/* ── Card rating row (hearts + notes button) ────────────────────────────────── */
+.card-rating-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 6px;
+}
+.card-rating-row .card-hearts {
+  margin-top: 0;
+}
+
+/* ── Notes button ───────────────────────────────────────────────────────────── */
+.btn-notes {
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0 2px;
+  opacity: 0.65;
+  transition:
+    opacity 0.15s,
+    transform 0.1s;
+  flex-shrink: 0;
+}
+.btn-notes:hover {
+  opacity: 1;
+  transform: scale(1.15);
+}
+.btn-notes.has-notes {
+  opacity: 1;
+}
+
 /* ── Card hearts (personal rating) ─────────────────────────────────────────── */
 /* Hearts are in reverse DOM order (5→1) + row-reverse so they display 1→5.
    This lets CSS sibling selector (~) reach hearts visually to the LEFT. */
@@ -623,6 +694,22 @@ nav {
   opacity: 0.6;
   cursor: not-allowed;
 }
+.btn-add-book-suggestion {
+  color: var(--primary);
+  border: 1px solid rgba(232, 201, 106, 0.3);
+  background: var(--primary-dim);
+}
+.btn-add-book-suggestion:hover { background: rgba(232, 201, 106, 0.2); }
+.btn-add-book-suggestion.added { color: var(--success); border-color: rgba(74, 222, 128, 0.3); background: rgba(74, 222, 128, 0.1); }
+.btn-add-book-suggestion:disabled { opacity: 0.6; cursor: not-allowed; }
+.btn-sugg-book-wishlist {
+  color: var(--text2);
+  border: 1px solid var(--border2);
+  background: var(--surface2);
+}
+.btn-sugg-book-wishlist:hover { border-color: var(--primary); color: var(--primary); }
+.btn-sugg-book-wishlist.added { color: var(--success); border-color: rgba(74, 222, 128, 0.3); background: rgba(74, 222, 128, 0.1); }
+.btn-sugg-book-wishlist:disabled { opacity: 0.6; cursor: not-allowed; }
 
 /* Wishlist group-by-platform */
 .wl-group {
@@ -1510,4 +1597,126 @@ nav {
   font-size: 12px;
   color: var(--muted);
   margin-top: 10px;
+}
+
+/* ── Flag filter button (in filter bar) ─────────────────────────────────────── */
+.flag-filter-btn {
+  font-size: 15px;
+  line-height: 1;
+  padding: 7px 8px;
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  filter: grayscale(1);
+  opacity: 0.6;
+  transition: border-color 0.15s, filter 0.15s, opacity 0.15s;
+  flex-shrink: 0;
+}
+.flag-filter-btn:hover {
+  filter: grayscale(0);
+  opacity: 1;
+  border-color: var(--border2);
+}
+.flag-filter-btn.active {
+  filter: grayscale(0);
+  opacity: 1;
+  border-color: rgba(220, 50, 50, 0.5);
+}
+
+/* ── Notes popup overlay ─────────────────────────────────────────────────────── */
+.notes-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 400;
+}
+.notes-overlay.hidden {
+  display: none;
+}
+.notes-popup {
+  background: var(--surface);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius);
+  width: 300px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+}
+.notes-popup-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text2);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.notes-suggested-wrap {
+  position: relative;
+}
+#notes-suggested-by,
+#notes-text {
+  width: 100%;
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  padding: 7px 9px;
+  outline: none;
+  font-family: inherit;
+  font-size: 13px;
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+}
+#notes-suggested-by:focus,
+#notes-text:focus {
+  border-color: var(--primary);
+}
+#notes-suggested-by::placeholder,
+#notes-text::placeholder {
+  color: var(--muted);
+}
+#notes-text {
+  display: block;
+  resize: vertical;
+  min-height: 80px;
+  line-height: 1.5;
+}
+.notes-autocomplete {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-sm);
+  z-index: 10;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+.notes-autocomplete.hidden {
+  display: none;
+}
+.notes-autocomplete-item {
+  padding: 7px 9px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--text);
+  transition:
+    background 0.1s,
+    color 0.1s;
+}
+.notes-autocomplete-item:hover {
+  background: var(--primary-dim);
+  color: var(--primary);
 }

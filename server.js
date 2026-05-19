@@ -320,13 +320,14 @@ async function tmdbFindByImdbId(imdbId, apiKey) {
   } catch { return null; }
 }
 
-async function tmdbWatchProviders(tmdbId, isTv, apiKey) {
+async function tmdbWatchProviders(tmdbId, isTv, apiKey, country = 'US') {
   try {
     const ep = isTv ? `/tv/${tmdbId}` : `/movie/${tmdbId}`;
     const data = await tmdbFetch(`${ep}/watch/providers`, apiKey);
     const PLATFORM_IDS = { 8: 'Netflix', 337: 'Disney+', 119: 'Amazon', 350: 'Apple' };
-    const allProviders = Object.values(data.results || {}).flatMap(c => c.flatrate || []);
-    return [...new Set(allProviders.map(p => PLATFORM_IDS[p.provider_id]).filter(Boolean))];
+    const countryData = (data.results || {})[country] || {};
+    const providers = countryData.flatrate || [];
+    return [...new Set(providers.map(p => PLATFORM_IDS[p.provider_id]).filter(Boolean))];
   } catch { return []; }
 }
 
@@ -481,7 +482,7 @@ async function suggestImdb(watched) {
   return enriched.length ? enriched : prescored.slice(0, 20);
 }
 
-async function suggestTmdb(watched, apiKey) {
+async function suggestTmdb(watched, apiKey, country = 'US') {
   const profile = buildProfile(watched);
   const watchedIds = new Set([
     ...watched.map(m => m.imdbId).filter(Boolean),
@@ -526,7 +527,7 @@ async function suggestTmdb(watched, apiKey) {
       const isTv = r.media_type === 'tv';
       return Promise.all([
         tmdbDetails(r.id, isTv ? 'tvSeries' : 'movie', apiKey),
-        tmdbWatchProviders(r.id, isTv, apiKey)
+        tmdbWatchProviders(r.id, isTv, apiKey, country)
       ]);
     })
   );
@@ -692,6 +693,28 @@ app.patch('/api/movies/:id/hearts', (req, res) => {
   res.json({ ok: true, hearts: movie.hearts });
 });
 
+app.patch('/api/movies/:id/notes', (req, res) => {
+  const { id } = req.params;
+  const { notes, suggestedBy } = req.body;
+  const movies = getMovies();
+  const movie = movies.find(m => m.imdbId === id || m.tmdbId?.toString() === id);
+  if (!movie) return res.status(404).json({ error: 'Not found' });
+  movie.notes = typeof notes === 'string' ? notes : '';
+  movie.suggestedBy = typeof suggestedBy === 'string' ? suggestedBy : '';
+  saveMovies(movies);
+  res.json({ ok: true });
+});
+
+app.patch('/api/movies/:id/rewatch', (req, res) => {
+  const { id } = req.params;
+  const movies = getMovies();
+  const movie = movies.find(m => m.imdbId === id || m.tmdbId?.toString() === id);
+  if (!movie) return res.status(404).json({ error: 'Not found' });
+  movie.rewatch = !movie.rewatch;
+  saveMovies(movies);
+  res.json({ ok: true, rewatch: movie.rewatch });
+});
+
 // ── Wishlist ──────────────────────────────────────────────────────────────────
 
 app.get('/api/wishlist', (req, res) => res.json(getWishlist()));
@@ -724,7 +747,7 @@ app.post('/api/wishlist', async (req, res) => {
       if (found) { resolvedTmdbId = found.id; resolvedIsTv = found.isTv; }
     }
     if (settings.tmdb && resolvedTmdbId) {
-      platforms = await tmdbWatchProviders(resolvedTmdbId, resolvedIsTv, settings.tmdb);
+      platforms = await tmdbWatchProviders(resolvedTmdbId, resolvedIsTv, settings.tmdb, settings.country || 'US');
     }
     const movie = { ...details, tmdbId: resolvedTmdbId || details.tmdbId, platforms, addedAt: new Date().toISOString() };
     const localPoster = await cachePoster(details.imdbId || resolvedTmdbId?.toString(), details.poster);
@@ -752,7 +775,7 @@ app.post('/api/wishlist/refresh-platforms', async (req, res) => {
       if (found) { tmdbId = found.id; isTv = found.isTv; if (!m.tmdbId) m.tmdbId = tmdbId; }
     }
     if (tmdbId) {
-      const platforms = await tmdbWatchProviders(tmdbId, isTv, settings.tmdb);
+      const platforms = await tmdbWatchProviders(tmdbId, isTv, settings.tmdb, settings.country || 'US');
       m.platforms = platforms;
       updated++;
     }
@@ -810,7 +833,7 @@ app.get('/api/suggestions', async (req, res) => {
   try {
     const settings = getSettings();
     const results = settings.tmdb
-      ? await suggestTmdb(watched, settings.tmdb)
+      ? await suggestTmdb(watched, settings.tmdb, settings.country || 'US')
       : await suggestImdb(watched);
     res.json(results);
   } catch (err) {
@@ -1103,6 +1126,28 @@ app.patch('/api/books/:id/hearts', (req, res) => {
   book.hearts = Math.round(hearts);
   saveBooks(books);
   res.json({ ok: true, hearts: book.hearts });
+});
+
+app.patch('/api/books/:id/notes', (req, res) => {
+  const { id } = req.params;
+  const { notes, suggestedBy } = req.body;
+  const books = getBooks();
+  const book = books.find(b => b.googleBooksId === id || b.openLibraryId === id);
+  if (!book) return res.status(404).json({ error: 'Not found' });
+  book.notes = typeof notes === 'string' ? notes : '';
+  book.suggestedBy = typeof suggestedBy === 'string' ? suggestedBy : '';
+  saveBooks(books);
+  res.json({ ok: true });
+});
+
+app.patch('/api/books/:id/reread', (req, res) => {
+  const { id } = req.params;
+  const books = getBooks();
+  const book = books.find(b => b.googleBooksId === id || b.openLibraryId === id);
+  if (!book) return res.status(404).json({ error: 'Not found' });
+  book.rewatch = !book.rewatch;
+  saveBooks(books);
+  res.json({ ok: true, rewatch: book.rewatch });
 });
 
 app.get('/api/books-trash', (req, res) => {
