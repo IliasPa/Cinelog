@@ -3,7 +3,8 @@
 // ── State ─────────────────────────────────────────────────────────────────────
 
 const state = {
-  section: "movies",
+  section: "overview",
+  overviewHeartFilter: 0,
   movies: [],
   books: [],
   suggestions: [],
@@ -459,6 +460,7 @@ async function loadBooks() {
   renderBooks();
   updateBookFilterOptions();
   renderSidebar();
+  if (state.section === "overview") renderOverview();
 }
 
 async function removeBook(id) {
@@ -691,19 +693,35 @@ function applyTabsMode(mode) {
   state.tabsMode = mode;
   const moviesBtn = document.querySelector('.nav-btn[data-section="movies"]');
   const booksBtn = document.querySelector('.nav-btn[data-section="books"]');
+  const toggles = [el("cal-mode-toggle"), el("sugg-mode-toggle"), el("wishlist-mode-toggle")];
+
   if (mode === "movies") {
     moviesBtn.style.display = "";
     booksBtn.style.display = "none";
     if (state.section === "books") goToSection("movies");
+    toggles.forEach((t) => (t.style.display = "none"));
+    state.calendarMode = "movies";
+    el("cal-mode-label").textContent = "🎬 Movies";
+    applySuggMode("movies");
+    applyWishlistMode("movies");
+    if (state.section === "calendar") renderCalendar();
   } else if (mode === "books") {
     moviesBtn.style.display = "none";
     booksBtn.style.display = "";
     if (state.section === "movies") goToSection("books");
+    toggles.forEach((t) => (t.style.display = "none"));
+    state.calendarMode = "books";
+    el("cal-mode-label").textContent = "📚 Books";
+    applySuggMode("books");
+    applyWishlistMode("books");
+    if (state.section === "calendar") renderCalendar();
   } else {
     moviesBtn.style.display = "";
     booksBtn.style.display = "";
+    toggles.forEach((t) => (t.style.display = ""));
   }
   renderTabsToggle();
+  if (state.section === "overview") renderOverview();
 }
 
 function renderTrash() {
@@ -1383,6 +1401,209 @@ function renderCalendar() {
 
 // ── Navigation ────────────────────────────────────────────────────────────────
 
+function renderOverviewHeartFilter() {
+  const n = state.overviewHeartFilter;
+  document.querySelectorAll("#overview-heart-filter .hf-heart").forEach((h) => {
+    h.classList.toggle("filled", parseInt(h.dataset.val) <= n);
+  });
+  el("overview-heart-filter").classList.toggle("active", n > 0);
+}
+
+function renderOverview() {
+  const content = el("overview-content");
+  if (!content) return;
+
+  const minH = state.overviewHeartFilter;
+  const mode = state.tabsMode; // "movies" | "books" | "both"
+  const showMovies = mode !== "books";
+  const showBooks  = mode !== "movies";
+  const now = new Date();
+  const curYear = now.getFullYear();
+  const curMonth = now.getMonth();
+  const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+  const allMovies = showMovies ? (minH > 0 ? state.movies.filter((m) => (m.hearts || 0) >= minH) : state.movies) : [];
+  const allBooks  = showBooks  ? (minH > 0 ? state.books.filter((b)  => (b.hearts  || 0) >= minH) : state.books)  : [];
+
+  function buildLast12(items) {
+    const months = [];
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(curYear, curMonth - i, 1);
+      months.push({ label: MONTHS[d.getMonth()], year: d.getFullYear(), month: d.getMonth(), count: 0 });
+    }
+    items.forEach((item) => {
+      if (!item.addedAt) return;
+      const d = new Date(item.addedAt);
+      const m = months.find((m) => m.year === d.getFullYear() && m.month === d.getMonth());
+      if (m) m.count++;
+    });
+    return months;
+  }
+
+  function calcStats(items) {
+    const thisMonth = items.filter((i) => {
+      const d = new Date(i.addedAt);
+      return d.getFullYear() === curYear && d.getMonth() === curMonth;
+    }).length;
+    const thisYear = items.filter((i) => new Date(i.addedAt).getFullYear() === curYear).length;
+
+    const months12 = buildLast12(items);
+    const bestMonth = months12.reduce((b, m) => (m.count > b.count ? m : b), months12[0]);
+    const bestLabel = bestMonth.count > 0
+      ? bestMonth.label + (bestMonth.year !== curYear ? " '" + String(bestMonth.year).slice(2) : "")
+      : "—";
+
+    const suggMap = {};
+    items.forEach((item) => {
+      const s = (item.suggestedBy || "").trim();
+      if (!s) return;
+      if (!suggMap[s]) suggMap[s] = { name: s, count: 0, totalHearts: 0 };
+      suggMap[s].count++;
+      suggMap[s].totalHearts += item.hearts || 0;
+    });
+    const topSuggester = Object.values(suggMap).sort(
+      (a, b) => b.count - a.count || b.totalHearts - a.totalHearts,
+    )[0];
+
+    const heartsDist = [1, 2, 3, 4, 5].map((n) => ({
+      n,
+      count: items.filter((i) => i.hearts === n).length,
+    }));
+    const maxHeartsCount = Math.max(...heartsDist.map((h) => h.count), 1);
+    const withHearts = items.filter((i) => (i.hearts || 0) > 0);
+    const avgHearts = withHearts.length
+      ? (withHearts.reduce((s, i) => s + i.hearts, 0) / withHearts.length).toFixed(1)
+      : null;
+
+    return { thisMonth, thisYear, bestLabel, bestMonthCount: bestMonth.count, topSuggester, heartsDist, maxHeartsCount, avgHearts };
+  }
+
+  const mStats = calcStats(allMovies);
+  const bStats = calcStats(allBooks);
+
+  // Monthly combined chart
+  const months = [];
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(curYear, curMonth - i, 1);
+    months.push({ label: MONTHS[d.getMonth()], year: d.getFullYear(), month: d.getMonth(), movies: 0, books: 0 });
+  }
+  allMovies.forEach((item) => {
+    if (!item.addedAt) return;
+    const d = new Date(item.addedAt);
+    const m = months.find((m) => m.year === d.getFullYear() && m.month === d.getMonth());
+    if (m) m.movies++;
+  });
+  allBooks.forEach((item) => {
+    if (!item.addedAt) return;
+    const d = new Date(item.addedAt);
+    const m = months.find((m) => m.year === d.getFullYear() && m.month === d.getMonth());
+    if (m) m.books++;
+  });
+
+  function renderSection(emoji, label, stats) {
+    const heartsHtml = stats.heartsDist.map((h) => `
+      <div class="ov-bar-col">
+        <div class="ov-bar-track">
+          <div class="ov-bar-fill ov-bar-hearts" style="height:${h.count ? Math.max(Math.round((h.count / stats.maxHeartsCount) * 100), 5) : 0}%">
+            ${h.count > 0 ? `<span class="ov-bar-val">${h.count}</span>` : ""}
+          </div>
+        </div>
+        <div class="ov-bar-label ov-hearts-label">${"♥".repeat(h.n)}</div>
+      </div>`).join("");
+
+    return `
+      <div class="ov-content-section">
+        <div class="ov-section-label">${emoji} ${label}</div>
+        <div class="ov-stats-grid">
+          <div class="ov-stat-card">
+            <div class="ov-stat-value">${stats.thisMonth}</div>
+            <div class="ov-stat-label">This Month</div>
+          </div>
+          <div class="ov-stat-card">
+            <div class="ov-stat-value">${stats.thisYear}</div>
+            <div class="ov-stat-label">This Year</div>
+          </div>
+          <div class="ov-stat-card">
+            <div class="ov-stat-value ov-text-value">${esc(stats.bestLabel)}</div>
+            <div class="ov-stat-label">Best Month${stats.bestMonthCount > 0 ? ` · ${stats.bestMonthCount}` : ""}</div>
+          </div>
+          <div class="ov-stat-card">
+            <div class="ov-stat-value ov-text-value">${stats.topSuggester ? esc(stats.topSuggester.name) : "—"}</div>
+            <div class="ov-stat-label">Top Suggester${stats.topSuggester ? ` · ${stats.topSuggester.count}` : ""}</div>
+          </div>
+        </div>
+        <div class="ov-section-lower">
+          <div class="ov-chart-card">
+            <div class="ov-chart-title">Hearts Distribution</div>
+            <div class="ov-bar-chart">${heartsHtml}</div>
+          </div>
+          <div class="ov-avg-card">
+            <div class="ov-avg-big">${stats.avgHearts || "—"}${stats.avgHearts ? `<span class="ov-avg-heart">♥</span>` : ""}</div>
+            <div class="ov-avg-label">Avg Hearts</div>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  let monthlyHeader, monthlyBars;
+  if (showMovies && showBooks) {
+    const maxMonthVal = Math.max(...months.map((m) => Math.max(m.movies, m.books)), 1);
+    monthlyHeader = `
+      <div class="ov-chart-header">
+        <div class="ov-chart-title">Monthly Activity (last 12 months)</div>
+        <div class="ov-chart-legend">
+          <span class="ov-legend-item"><span class="ov-legend-dot ov-dot-movies"></span>Movies</span>
+          <span class="ov-legend-item"><span class="ov-legend-dot ov-dot-books"></span>Books</span>
+        </div>
+      </div>`;
+    monthlyBars = months.map((m) => `
+      <div class="ov-bar-col">
+        <div class="ov-bar-dual">
+          <div class="ov-bar-track-sm">
+            <div class="ov-bar-fill ov-bar-movies" style="height:${m.movies ? Math.max(Math.round((m.movies / maxMonthVal) * 100), 5) : 0}%"></div>
+          </div>
+          <div class="ov-bar-track-sm">
+            <div class="ov-bar-fill ov-bar-books" style="height:${m.books ? Math.max(Math.round((m.books / maxMonthVal) * 100), 5) : 0}%"></div>
+          </div>
+        </div>
+        <div class="ov-bar-label">${m.label}</div>
+      </div>`).join("");
+  } else {
+    const colorClass = showMovies ? "ov-bar-movies" : "ov-bar-books";
+    const counts = months.map((m) => (showMovies ? m.movies : m.books));
+    const maxCount = Math.max(...counts, 1);
+    monthlyHeader = `
+      <div class="ov-chart-header">
+        <div class="ov-chart-title">Monthly Activity (last 12 months)</div>
+      </div>`;
+    monthlyBars = months.map((m, i) => {
+      const cnt = counts[i];
+      return `
+        <div class="ov-bar-col">
+          <div class="ov-bar-track">
+            <div class="ov-bar-fill ${colorClass}" style="height:${cnt ? Math.max(Math.round((cnt / maxCount) * 100), 5) : 0}%">
+              ${cnt > 0 ? `<span class="ov-bar-val">${cnt}</span>` : ""}
+            </div>
+          </div>
+          <div class="ov-bar-label">${m.label}</div>
+        </div>`;
+    }).join("");
+  }
+
+  let sectionsHtml = "";
+  if (showMovies) sectionsHtml += renderSection("🎬", "Movies", mStats);
+  if (showBooks)  sectionsHtml += renderSection("📚", "Books", bStats);
+
+  content.innerHTML = `
+    <div class="ov-sections-row">
+      ${sectionsHtml}
+    </div>
+    <div class="ov-chart-card">
+      ${monthlyHeader}
+      <div class="ov-bar-chart ov-monthly-chart">${monthlyBars}</div>
+    </div>`;
+}
+
 function goToSection(name) {
   state.section = name;
   document
@@ -1395,6 +1616,7 @@ function goToSection(name) {
   document
     .querySelector(`.nav-btn[data-section="${name}"]`)
     ?.classList.add("active");
+  if (name === "overview") renderOverview();
   if (name === "suggestions" && !state.suggestions.length) loadSuggestions();
   if (name === "trash") loadTrash();
   if (name === "calendar") renderCalendar();
@@ -1416,6 +1638,7 @@ async function loadMovies() {
   renderMovies();
   updateFilterOptions();
   renderSidebar();
+  if (state.section === "overview") renderOverview();
 }
 
 async function loadSuggestions() {
@@ -1529,6 +1752,16 @@ function init() {
   // Navigation
   document.querySelectorAll(".nav-btn").forEach((btn) => {
     btn.addEventListener("click", () => goToSection(btn.dataset.section));
+  });
+
+  // Overview heart filter
+  el("overview-heart-filter").addEventListener("click", (e) => {
+    const heart = e.target.closest(".hf-heart");
+    if (!heart) return;
+    const val = parseInt(heart.dataset.val);
+    state.overviewHeartFilter = state.overviewHeartFilter === val ? 0 : val;
+    renderOverviewHeartFilter();
+    renderOverview();
   });
 
   // Add movie button

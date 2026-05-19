@@ -1,8 +1,14 @@
-# Cinelog v2.1
+# Cinelog v2.2
 
 A personal movie and book library app that runs locally in your browser.
 
 ![Cinelog](cinelog_app_icon.svg)
+
+## What's new in v2.2
+
+- **Overview tab** — a new first tab with at-a-glance stats for your entire library: monthly and yearly counts, best month, top suggester, hearts distribution bar chart, and a prominent average hearts display; heart filter in the top-right corner to scope all stats to a minimum rating; Movies and Books shown in separate sections side by side on wide screens
+- **Monthly Activity chart** — bar chart of the last 12 months with separate coloured bars for movies (purple) and books (gold); collapses to a single bar when the Library Tabs setting is set to one content type
+- **Library Tabs now controls tab toggles** — when set to Movies-only or Books-only, the mode-toggle buttons inside Calendar, Suggestions, and Wish List are automatically hidden and each tab is locked to the active content type; switching back to Both restores all toggles
 
 ## What's new in v2.1
 
@@ -22,6 +28,15 @@ A personal movie and book library app that runs locally in your browser.
 - **Sidebar stats** — bottom-left shows Movies and Books counts with a larger font; no genres clutter
 
 ## Features
+
+### Overview
+- **Stats** — monthly and yearly counts of watched movies and read books, best month (with item count), top suggester (person whose recommendations appear most)
+- **Hearts distribution** — bar chart of how many items have each heart rating (1–5), shown separately for Movies and Books
+- **Average hearts** — prominently displayed average heart rating per content type
+- **Monthly Activity** — bar chart covering the last 12 months; dual-coloured bars when both content types are enabled
+- **Heart filter** — top-right filter scopes all stats to items with a minimum number of hearts
+- **Responsive layout** — Movies and Books sections sit side by side on wide screens, stacked on narrow ones
+- **Respects Library Tabs** — shows only the active content type(s) set in Settings
 
 ### Movies
 - **My Movies** — add by searching IMDb or by IMDb/TMDB ID; track everything you've watched
@@ -112,6 +127,14 @@ All data files are excluded from git — your library stays private.
 ---
 
 ## Changelog
+
+### v2.2
+
+- Overview tab (first in sidebar) with per-type stats: monthly count, yearly count, best month, top suggester, hearts distribution chart, and large average hearts display
+- Monthly Activity bar chart spanning the last 12 months — dual-colour bars (purple = movies, gold = books) when both types are active, single bar otherwise
+- Heart filter on Overview — scopes all stats and charts to items with a minimum heart rating
+- Overview sections shown side by side on wide screens (≥ 1100 px), stacked on narrow screens
+- Library Tabs setting now also hides the mode-toggle button in Calendar, Suggestions, and Wish List when only one content type is active; switching back to Both restores all toggles
 
 ### v2.1
 

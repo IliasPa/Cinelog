@@ -22,7 +22,20 @@
           <span class="brand-name">Cinelog</span>
         </div>
         <nav>
-          <button class="nav-btn active" data-section="movies">
+          <button class="nav-btn active" data-section="overview">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <rect x="3" y="12" width="4" height="9" rx="1" />
+              <rect x="9.5" y="7" width="4" height="14" rx="1" />
+              <rect x="16" y="3" width="4" height="18" rx="1" />
+            </svg>
+            Overview
+          </button>
+          <button class="nav-btn" data-section="movies">
             <svg
               viewBox="0 0 24 24"
               fill="none"
@@ -126,8 +139,23 @@
 
       <!-- Main -->
       <main id="main">
+        <!-- Overview Section -->
+        <section id="section-overview" class="section">
+          <div class="section-header">
+            <h1>Overview</h1>
+            <div class="heart-filter" id="overview-heart-filter" title="Filter stats by minimum hearts">
+              <span class="hf-heart" data-val="5">♥</span>
+              <span class="hf-heart" data-val="4">♥</span>
+              <span class="hf-heart" data-val="3">♥</span>
+              <span class="hf-heart" data-val="2">♥</span>
+              <span class="hf-heart" data-val="1">♥</span>
+            </div>
+          </div>
+          <div id="overview-content" class="overview-content"></div>
+        </section>
+
         <!-- My Movies Section -->
-        <section id="section-movies" class="section">
+        <section id="section-movies" class="section hidden">
           <div class="section-header">
             <h1>My Movies</h1>
             <button id="btn-add" class="btn-primary">
