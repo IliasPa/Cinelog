@@ -158,16 +158,15 @@ nav {
 }
 .stat-num {
   font-family: "Oswald", sans-serif;
-  font-size: 22px;
+  font-size: 28px;
   font-weight: 600;
   color: var(--primary);
   line-height: 1;
 }
 .stat-label {
-  font-size: 11px;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  font-size: 12px;
+  color: var(--text2);
+  letter-spacing: 0.2px;
 }
 
 /* ── Main ──────────────────────────────────────────────────────────────────── */
@@ -565,16 +564,19 @@ nav {
   transition: all 0.15s;
   letter-spacing: 0.2px;
 }
-.btn-mark-watched {
+.btn-mark-watched,
+.btn-mark-read {
   color: var(--success);
   border: 1px solid rgba(74, 222, 128, 0.3);
   background: rgba(74, 222, 128, 0.08);
   width: 100%;
 }
-.btn-mark-watched:hover {
+.btn-mark-watched:hover,
+.btn-mark-read:hover {
   background: rgba(74, 222, 128, 0.18);
 }
-.btn-mark-watched:disabled {
+.btn-mark-watched:disabled,
+.btn-mark-read:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
@@ -1415,4 +1417,97 @@ nav {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+}
+
+/* ── Book badge ─────────────────────────────────────────────────────────────── */
+.book-badge {
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.15);
+}
+
+/* ── Section panels (suggestions / wishlist mode switching) ─────────────────── */
+.section-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+.section-panel.hidden {
+  display: none;
+}
+
+/* ── Calendar mode toggle ───────────────────────────────────────────────────── */
+.cal-mode-btn {
+  font-size: 13.5px;
+  min-width: 120px;
+  justify-content: center;
+}
+
+/* ── Trash sections ─────────────────────────────────────────────────────────── */
+.trash-outer-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  padding: 0 28px 28px;
+  overflow-y: auto;
+  flex: 1;
+}
+.trash-outer-grid::-webkit-scrollbar {
+  width: 6px;
+}
+.trash-outer-grid::-webkit-scrollbar-thumb {
+  background: var(--border2);
+  border-radius: 3px;
+}
+.trash-section {
+  display: flex;
+  flex-direction: column;
+}
+.trash-section-header {
+  font-family: "Oswald", sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text2);
+  padding: 0 0 10px;
+  border-bottom: 1px solid var(--border2);
+  margin-bottom: 16px;
+  letter-spacing: 0.3px;
+}
+.inline-grid {
+  overflow-y: visible;
+  flex: none;
+  padding: 0;
+}
+
+/* ── Settings: triple tabs toggle ───────────────────────────────────────────── */
+.tabs-toggle {
+  display: inline-flex;
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius);
+  padding: 4px;
+  gap: 3px;
+  margin-top: 14px;
+}
+.tabs-toggle-btn {
+  font-size: 22px;
+  padding: 8px 18px;
+  border-radius: var(--radius-sm);
+  transition: all 0.15s;
+  color: var(--muted);
+  line-height: 1;
+}
+.tabs-toggle-btn:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+.tabs-toggle-btn.active {
+  background: var(--primary-dim);
+  box-shadow: 0 0 0 1px rgba(232, 201, 106, 0.25);
+}
+.tabs-toggle-hint {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 10px;
 }

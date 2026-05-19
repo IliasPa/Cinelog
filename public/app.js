@@ -5,8 +5,11 @@
 const state = {
   section: "movies",
   movies: [],
+  books: [],
   suggestions: [],
+  bookSuggestions: [],
   trash: [],
+  booksTrash: [],
   settings: {},
   filters: {
     type: "",
@@ -18,8 +21,18 @@ const state = {
     q: "",
     minHearts: 0,
   },
+  bookFilters: {
+    genre: "",
+    minRating: "",
+    sort: "addedAt",
+    order: "desc",
+    q: "",
+    minHearts: 0,
+  },
   suggFilters: { type: "", genre: "", minRating: "", platform: "" },
+  bookSuggFilters: { genre: "" },
   wishlist: [],
+  booksWishlist: [],
   wishlistFilters: {
     type: "",
     genre: "",
@@ -29,10 +42,22 @@ const state = {
     order: "desc",
     q: "",
   },
+  booksWishlistFilters: { genre: "", sort: "addedAt", q: "" },
   wishlistGroupByPlatform: false,
   calendarMonth: new Date(),
+  calendarMode: "movies",
+  tabsMode: "both",
+  modalMode: "movie",
+  suggMode: "movies",
+  wishlistMode: "movies",
   modal: { open: false, results: [], selected: null },
-  loading: { movies: false, suggestions: false, trash: false },
+  loading: {
+    movies: false,
+    suggestions: false,
+    trash: false,
+    books: false,
+    bookSuggestions: false,
+  },
 };
 
 // ── API client ────────────────────────────────────────────────────────────────
@@ -83,6 +108,34 @@ const api = {
     api.patch(`/api/movies/${encodeURIComponent(id)}/restore`, {}),
   deleteForever: (id) => api.del(`/api/trash/${encodeURIComponent(id)}`),
   emptyTrash: () => api.del("/api/trash"),
+  // Books
+  searchBooks: (q) => api.get(`/api/search-books?q=${encodeURIComponent(q)}`),
+  bookDetails: (id, source) =>
+    api.get(
+      `/api/book-details/${encodeURIComponent(id)}?source=${encodeURIComponent(source || "")}`,
+    ),
+  getBooks: () => api.get("/api/books"),
+  addBook: (data) => api.post("/api/books", data),
+  removeBook: (id) => api.del(`/api/books/${encodeURIComponent(id)}`),
+  setBookHearts: (id, hearts) =>
+    api.patch(`/api/books/${encodeURIComponent(id)}/hearts`, { hearts }),
+  getBooksTrash: () => api.get("/api/books-trash"),
+  restoreBook: (id) =>
+    api.patch(`/api/books/${encodeURIComponent(id)}/restore`, {}),
+  deleteBookForever: (id) =>
+    api.del(`/api/books-trash/${encodeURIComponent(id)}`),
+  emptyBooksTrash: () => api.del("/api/books-trash"),
+  getBookSuggestions: () => api.get("/api/book-suggestions"),
+  getBookWishlist: () => api.get("/api/books-wishlist"),
+  addBookToWishlist: (data) => api.post("/api/books-wishlist", data),
+  removeFromBookWishlist: (id) =>
+    api.del(`/api/books-wishlist/${encodeURIComponent(id)}`),
+  setBookWishlistHearts: (id, hearts) =>
+    api.patch(`/api/books-wishlist/${encodeURIComponent(id)}/hearts`, {
+      hearts,
+    }),
+  markBookAsRead: (id) =>
+    api.patch(`/api/books-wishlist/${encodeURIComponent(id)}/read`, {}),
 };
 
 // ── Utils ─────────────────────────────────────────────────────────────────────
@@ -141,18 +194,12 @@ function platformClass(name) {
 // ── Rendering ─────────────────────────────────────────────────────────────────
 
 function renderSidebar() {
-  const genreCount = new Set(state.movies.flatMap((m) => m.genres || [])).size;
-  el("sidebar-stats").innerHTML = state.movies.length
-    ? `<div class="stats">
-        <div class="stat-item">
-          <span class="stat-num">${state.movies.length}</span>
-          <span class="stat-label">movies</span>
-        </div>
-        <div class="stat-item">
-          <span class="stat-num">${genreCount}</span>
-          <span class="stat-label">genres</span>
-        </div>
-      </div>`
+  const rows = [
+    { count: state.movies.length, label: "Movies" },
+    { count: state.books.length, label: "Books" },
+  ].filter((r) => r.count > 0);
+  el("sidebar-stats").innerHTML = rows.length
+    ? `<div class="stats">${rows.map((r) => `<div class="stat-item"><span class="stat-num">${r.count}</span><span class="stat-label">${r.label}</span></div>`).join("")}</div>`
     : "";
 }
 
@@ -236,6 +283,173 @@ function movieCard(m, mode) {
     </div>`;
 }
 
+function bookCard(b, mode) {
+  const isTrash = mode === "trash";
+  const isSuggestion = mode === "suggestion";
+  const isWishlist = mode === "wishlist";
+  const bookId = esc(b.googleBooksId || b.openLibraryId || b.isbn || "");
+  const cover = b.cover
+    ? `<img class="poster" src="${esc(b.cover)}" alt="${esc(b.title)}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+    : "";
+  const noCoverDisplay = b.cover ? "none" : "flex";
+  const noCover = `<div class="no-poster" style="display:${noCoverDisplay}">📚</div>`;
+  const genreHtml = (b.genres || [])
+    .slice(0, 3)
+    .map((g) => `<span class="genre-tag">${esc(g)}</span>`)
+    .join("");
+  const showHearts = !isTrash && !isSuggestion && !isWishlist;
+  const heartsHtml = showHearts
+    ? `<div class="card-hearts" data-id="${bookId}">
+        ${[5, 4, 3, 2, 1].map((n) => `<span class="card-heart${(b.hearts || 0) >= n ? " filled" : ""}" data-val="${n}">♥</span>`).join("")}
+      </div>`
+    : "";
+  let action = "";
+  if (isTrash) {
+    action = `<div class="trash-actions">
+        <button class="btn-small btn-restore" data-id="${bookId}">↩ Restore</button>
+        <button class="btn-small btn-delete-forever" data-id="${bookId}">✕ Delete Forever</button>
+      </div>`;
+  } else if (isSuggestion) {
+    const isbn = esc(b.isbn || "");
+    const gbId = esc(b.googleBooksId || "");
+    const olId = esc(b.openLibraryId || "");
+    action = `<div class="card-actions">
+        <button class="btn-small btn-add-book-suggestion" data-isbn="${isbn}" data-google-books-id="${gbId}" data-open-library-id="${olId}">+ Read</button>
+        <button class="btn-small btn-sugg-book-wishlist" data-isbn="${isbn}" data-google-books-id="${gbId}" data-open-library-id="${olId}">☆ List</button>
+      </div>`;
+  } else if (isWishlist) {
+    action = `<div class="card-actions">
+        <button class="btn-small btn-mark-read" data-id="${bookId}">✓ Mark as Read</button>
+      </div>`;
+  }
+  const removeBtn =
+    !isTrash && !isSuggestion
+      ? `<button class="btn-remove-x" data-id="${bookId}" title="Move to Trash">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>`
+      : "";
+  const ratingHtml = b.rating
+    ? `<span class="rating-badge">★ ${Number(b.rating).toFixed(1)}</span>`
+    : "<span></span>";
+  const googleUrl = b.googleBooksId
+    ? `https://books.google.com/books?id=${b.googleBooksId}`
+    : null;
+  return `
+    <div class="movie-card" data-id="${bookId}" data-item-type="book"${googleUrl ? ` style="cursor:pointer" data-google-url="${esc(googleUrl)}"` : ""}>
+      <div class="poster-wrap">
+        ${cover}${noCover}
+        <div class="card-overlay">
+          ${ratingHtml}
+          <span class="type-badge book-badge">Book</span>
+        </div>
+        ${removeBtn}
+      </div>
+      <div class="card-body">
+        <h3 class="card-title">${esc(b.title)}</h3>
+        <div class="card-meta">
+          ${b.year ? `<span>${b.year}</span>` : ""}
+          ${b.pageCount ? `<span>${b.pageCount} pp</span>` : ""}
+        </div>
+        <div class="genres-list">${genreHtml}</div>
+        ${b.authors?.length ? `<div class="directors">By: ${esc(b.authors.slice(0, 2).join(", "))}</div>` : ""}
+        ${b.description ? `<div class="plot">${esc(b.description.slice(0, 110))}${b.description.length > 110 ? "…" : ""}</div>` : ""}
+        ${heartsHtml}
+        ${action}
+      </div>
+    </div>`;
+}
+
+function renderBooks() {
+  const grid = el("books-grid");
+  if (state.loading.books) {
+    grid.innerHTML =
+      '<div class="loading"><div class="spinner"></div><span>Loading…</span></div>';
+    return;
+  }
+  let list = state.books;
+  const f = state.bookFilters;
+  if (f.q) {
+    const q = f.q.toLowerCase();
+    list = list.filter(
+      (b) =>
+        b.title?.toLowerCase().includes(q) ||
+        (b.authors || []).some((a) => a.toLowerCase().includes(q)),
+    );
+  }
+  if (f.minHearts > 0)
+    list = list.filter((b) => (b.hearts || 0) >= f.minHearts);
+  if (!list.length) {
+    grid.innerHTML = state.books.length
+      ? '<div class="empty"><span>No books match your filters.</span></div>'
+      : `<div class="empty">
+           <span>No books yet.</span>
+           <span>Click <strong>+ Add Book</strong> to get started.</span>
+         </div>`;
+    return;
+  }
+  grid.innerHTML = list.map((b) => bookCard(b, "watched")).join("");
+}
+
+function renderBookHeartFilter() {
+  const n = state.bookFilters.minHearts;
+  document.querySelectorAll("#book-heart-filter .hf-heart").forEach((h) => {
+    h.classList.toggle("filled", parseInt(h.dataset.val) <= n);
+  });
+  el("book-heart-filter").classList.toggle("active", n > 0);
+}
+
+function updateBookFilterOptions() {
+  const genres = [
+    ...new Set(state.books.flatMap((b) => b.genres || [])),
+  ].sort();
+  const f = state.bookFilters;
+  el("book-filter-genre").innerHTML =
+    '<option value="">All Genres</option>' +
+    genres
+      .map(
+        (g) =>
+          `<option value="${g}" ${f.genre === g ? "selected" : ""}>${esc(g)}</option>`,
+      )
+      .join("");
+}
+
+async function loadBooks() {
+  state.loading.books = true;
+  renderBooks();
+  try {
+    state.books = await api.getBooks();
+  } catch (err) {
+    showToast(err.message, "error");
+  }
+  state.loading.books = false;
+  renderBooks();
+  updateBookFilterOptions();
+  renderSidebar();
+}
+
+async function removeBook(id) {
+  const book = state.books.find(
+    (b) => b.googleBooksId === id || b.openLibraryId === id,
+  );
+  try {
+    await api.removeBook(id);
+    state.books = state.books.filter(
+      (b) => b.googleBooksId !== id && b.openLibraryId !== id,
+    );
+    if (book) {
+      book.deletedAt = new Date().toISOString();
+      state.booksTrash.unshift(book);
+    }
+    renderBooks();
+    updateBookFilterOptions();
+    renderSidebar();
+    updateTrashBadge();
+    showToast("Moved to Trash", "success");
+  } catch (err) {
+    showToast(err.message, "error");
+  }
+}
+
 function renderMovies() {
   const grid = el("movies-grid");
   if (state.loading.movies) {
@@ -317,6 +531,18 @@ function updateSuggestionFilterOptions() {
   el("sugg-filter-platform").style.display = hasplatforms ? "" : "none";
 }
 
+function applySuggMode(mode) {
+  state.suggMode = mode;
+  el("sugg-mode-label").textContent =
+    mode === "books" ? "📚 Books" : "🎬 Movies";
+  el("sugg-movies-panel").classList.toggle("hidden", mode === "books");
+  el("sugg-books-panel").classList.toggle("hidden", mode === "movies");
+  el("sugg-section-sub").textContent =
+    mode === "books"
+      ? "Based on your taste — genres & authors you love"
+      : "Based on your taste — genres, directors & actors you love";
+}
+
 function renderSuggestions() {
   const grid = el("suggestions-grid");
   if (state.loading.suggestions) {
@@ -350,6 +576,53 @@ function renderSuggestions() {
   grid.innerHTML = list.map((m) => movieCard(m, "suggestion")).join("");
 }
 
+function renderBookSuggestions() {
+  const grid = el("book-suggestions-grid");
+  if (state.loading.bookSuggestions) {
+    grid.innerHTML =
+      '<div class="loading"><div class="spinner"></div><span>Finding book recommendations…</span></div>';
+    return;
+  }
+  if (!state.books.length) {
+    grid.innerHTML =
+      '<div class="empty"><span>Add some books to your library first to get suggestions.</span></div>';
+    return;
+  }
+  let list = state.bookSuggestions;
+  const f = state.bookSuggFilters;
+  if (f.genre) list = list.filter((b) => (b.genres || []).includes(f.genre));
+  if (!list.length) {
+    grid.innerHTML = state.bookSuggestions.length
+      ? '<div class="empty"><span>No book suggestions match your filters.</span></div>'
+      : '<div class="empty"><span>No book suggestions found. Try adding more books to your library.</span></div>';
+    return;
+  }
+  grid.innerHTML = list.map((b) => bookCard(b, "suggestion")).join("");
+}
+
+async function loadBookSuggestions() {
+  state.loading.bookSuggestions = true;
+  renderBookSuggestions();
+  try {
+    const data = await api.getBookSuggestions();
+    state.bookSuggestions = data.results || data;
+    const allGenres = [
+      ...new Set(state.bookSuggestions.flatMap((b) => b.genres || [])),
+    ].sort();
+    const genreSel = el("bsugg-filter-genre");
+    genreSel.innerHTML =
+      '<option value="">All Genres</option>' +
+      allGenres
+        .map((g) => `<option value="${esc(g)}">${esc(g)}</option>`)
+        .join("");
+  } catch (err) {
+    showToast(`Book suggestions failed: ${err.message}`, "error");
+    state.bookSuggestions = [];
+  }
+  state.loading.bookSuggestions = false;
+  renderBookSuggestions();
+}
+
 function renderSettings() {
   el("setting-tmdb").value = state.settings.tmdb || "";
   const hasKey = Boolean(state.settings.tmdb);
@@ -359,6 +632,40 @@ function renderSettings() {
   el("source-dot").style.background = hasKey
     ? "var(--primary)"
     : "var(--success)";
+  el("setting-nyt").value = state.settings.nyt || "";
+  renderTabsToggle();
+}
+
+function renderTabsToggle() {
+  const mode = state.tabsMode || "both";
+  document.querySelectorAll(".tabs-toggle-btn").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.mode === mode);
+  });
+  const hints = {
+    books: "Showing Books only",
+    movies: "Showing Movies only",
+    both: "Showing both Movies & Books",
+  };
+  el("tabs-toggle-hint").textContent = hints[mode] || hints.both;
+}
+
+function applyTabsMode(mode) {
+  state.tabsMode = mode;
+  const moviesBtn = document.querySelector('.nav-btn[data-section="movies"]');
+  const booksBtn = document.querySelector('.nav-btn[data-section="books"]');
+  if (mode === "movies") {
+    moviesBtn.style.display = "";
+    booksBtn.style.display = "none";
+    if (state.section === "books") goToSection("movies");
+  } else if (mode === "books") {
+    moviesBtn.style.display = "none";
+    booksBtn.style.display = "";
+    if (state.section === "movies") goToSection("books");
+  } else {
+    moviesBtn.style.display = "";
+    booksBtn.style.display = "";
+  }
+  renderTabsToggle();
 }
 
 function renderTrash() {
@@ -368,29 +675,50 @@ function renderTrash() {
       '<div class="loading"><div class="spinner"></div><span>Loading…</span></div>';
     return;
   }
-  if (!state.trash.length) {
+  const hasMovies = state.trash.length > 0;
+  const hasBooks = state.booksTrash.length > 0;
+  if (!hasMovies && !hasBooks) {
     grid.innerHTML = '<div class="empty"><span>Trash is empty.</span></div>';
     return;
   }
-  grid.innerHTML = state.trash.map((m) => movieCard(m, "trash")).join("");
+  let html = "";
+  if (hasMovies) {
+    html += `<div class="trash-section">
+      <div class="trash-section-header">🎬 Movies</div>
+      <div class="movie-grid inline-grid">${state.trash.map((m) => movieCard(m, "trash")).join("")}</div>
+    </div>`;
+  }
+  if (hasBooks) {
+    html += `<div class="trash-section">
+      <div class="trash-section-header">📚 Books</div>
+      <div class="movie-grid inline-grid">${state.booksTrash.map((b) => bookCard(b, "trash")).join("")}</div>
+    </div>`;
+  }
+  grid.innerHTML = html;
 }
 
 function updateTrashBadge() {
   const badge = el("trash-count");
-  const count = state.trash.length;
+  const count = state.trash.length + state.booksTrash.length;
   badge.textContent = count;
   badge.style.display = count > 0 ? "" : "none";
 }
 
 // ── Modal ─────────────────────────────────────────────────────────────────────
 
-function openModal() {
+function openModal(mode = "movie") {
+  state.modalMode = mode;
   state.modal = { open: true, results: [], selected: null };
   el("modal-overlay").classList.remove("hidden");
   el("search-results").innerHTML = "";
   el("search-input").value = "";
   el("movie-preview").classList.add("hidden");
   el("modal-search-panel").style.display = "";
+  el("modal-title").textContent = mode === "book" ? "Add Book" : "Add Movie";
+  el("search-input").placeholder =
+    mode === "book"
+      ? "Search by title or author…"
+      : "Search by title or paste IMDB ID (tt…)";
   setTimeout(() => el("search-input").focus(), 50);
 }
 
@@ -428,6 +756,142 @@ function showSearchResults(results) {
     </div>`,
     )
     .join("");
+}
+
+function showBookSearchResults(results) {
+  state.modal.results = results;
+  if (!results.length) {
+    el("search-results").innerHTML =
+      '<div class="no-results">No books found. Try a different title or author.</div>';
+    return;
+  }
+  el("search-results").innerHTML = results
+    .map(
+      (r) => `
+    <div class="search-result"
+      data-google-books-id="${esc(r.googleBooksId || "")}"
+      data-open-library-id="${esc(r.openLibraryId || "")}"
+      data-source="${esc(r.source || "google-books")}">
+      <div class="result-poster">
+        ${r.cover ? `<img src="${esc(r.cover)}" alt="" loading="lazy" onerror="this.style.display='none'">` : `<div class="no-poster-sm">📚</div>`}
+      </div>
+      <div class="result-info">
+        <div class="result-title">${esc(r.title)}</div>
+        <div class="result-meta">
+          ${r.year ? `<span>${r.year}</span>` : ""}
+          ${r.authors?.length ? `<span class="cast-hint">${esc(r.authors.slice(0, 2).join(", "))}</span>` : ""}
+        </div>
+      </div>
+    </div>`,
+    )
+    .join("");
+}
+
+async function showBookPreview(googleBooksId, openLibraryId, source) {
+  el("modal-search-panel").style.display = "none";
+  el("movie-preview").classList.remove("hidden");
+  el("movie-preview").innerHTML =
+    '<div class="loading"><div class="spinner"></div></div>';
+  try {
+    const id = googleBooksId || openLibraryId;
+    const details = await api.bookDetails(id, source);
+    state.modal.selected = details;
+    el("movie-preview").innerHTML = `
+      <button class="btn-link" id="back-btn">← Back to results</button>
+      <div class="preview-content">
+        <div class="preview-poster">
+          ${details.cover ? `<img src="${esc(details.cover)}" alt="${esc(details.title)}">` : `<div class="no-poster-lg">📚</div>`}
+        </div>
+        <div class="preview-info">
+          <h2>${esc(details.title)}</h2>
+          <div class="preview-meta">
+            ${details.year ? `<span>${details.year}</span>` : ""}
+            ${details.pageCount ? `<span>${details.pageCount} pages</span>` : ""}
+            ${details.rating ? `<span class="rating-badge">★ ${Number(details.rating).toFixed(1)}</span>` : ""}
+          </div>
+          <div class="genres-list" style="margin-bottom:4px">
+            ${(details.genres || []).map((g) => `<span class="genre-tag">${esc(g)}</span>`).join("")}
+          </div>
+          ${details.authors?.length ? `<p><strong>Author:</strong> ${esc(details.authors.join(", "))}</p>` : ""}
+          ${details.publisher ? `<p><strong>Publisher:</strong> ${esc(details.publisher)}</p>` : ""}
+          ${details.description ? `<p class="preview-plot">${esc(details.description)}</p>` : ""}
+          <div class="preview-actions">
+            <button id="btn-confirm-add-book" class="btn-primary">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Add to My Books
+            </button>
+            <button id="btn-confirm-add-book-wishlist" class="btn-secondary">☆ Add to Wish List</button>
+          </div>
+        </div>
+      </div>`;
+    el("back-btn").addEventListener("click", () => {
+      el("movie-preview").classList.add("hidden");
+      el("modal-search-panel").style.display = "";
+    });
+    el("btn-confirm-add-book").addEventListener("click", () =>
+      confirmAddBook(details),
+    );
+    el("btn-confirm-add-book-wishlist").addEventListener("click", () =>
+      confirmAddBookToWishlist(details),
+    );
+  } catch (err) {
+    el("movie-preview").innerHTML = `
+      <button class="btn-link" id="back-btn">← Back to results</button>
+      <div class="error" style="margin-top:12px">Failed to load details: ${esc(err.message)}</div>`;
+    el("back-btn").addEventListener("click", () => {
+      el("movie-preview").classList.add("hidden");
+      el("modal-search-panel").style.display = "";
+    });
+  }
+}
+
+async function confirmAddBook(details) {
+  const btn = el("btn-confirm-add-book");
+  btn.disabled = true;
+  btn.innerHTML = `<div class="spinner-sm" style="display:inline-block"></div> Adding…`;
+  try {
+    const book = await api.addBook({
+      googleBooksId: details.googleBooksId,
+      openLibraryId: details.openLibraryId,
+      source: details.source,
+    });
+    state.books.unshift(book);
+    closeModal();
+    goToSection("books");
+    renderBooks();
+    updateBookFilterOptions();
+    renderSidebar();
+    showToast(`"${details.title}" added to your books!`, "success");
+  } catch (err) {
+    btn.disabled = false;
+    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Add to My Books`;
+    showToast(err.message, "error");
+  }
+}
+
+async function confirmAddBookToWishlist(details) {
+  const btn = el("btn-confirm-add-book-wishlist");
+  btn.disabled = true;
+  btn.textContent = "Adding…";
+  try {
+    const book = await api.addBookToWishlist({
+      googleBooksId: details.googleBooksId,
+      openLibraryId: details.openLibraryId,
+      source: details.source,
+    });
+    state.booksWishlist.unshift(book);
+    closeModal();
+    goToSection("wishlist");
+    state.wishlistMode = "books";
+    applyWishlistMode("books");
+    renderBooksWishlist();
+    updateBooksWishlistFilterOptions();
+    showToast(`"${details.title}" added to Book Wish List!`, "success");
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = "☆ Add to Book Wish List";
+    showToast(err.message, "error");
+  }
 }
 
 async function showMoviePreview(imdbId, tmdbId, type) {
@@ -659,6 +1123,74 @@ async function loadWishlist() {
   updateWishlistFilterOptions();
 }
 
+function applyWishlistMode(mode) {
+  state.wishlistMode = mode;
+  el("wishlist-mode-label").textContent =
+    mode === "books" ? "📚 Books" : "🎬 Movies";
+  el("wishlist-section-sub").textContent =
+    mode === "books" ? "Books you want to read" : "Movies you want to watch";
+  el("wishlist-movies-panel").classList.toggle("hidden", mode === "books");
+  el("wishlist-books-panel").classList.toggle("hidden", mode === "movies");
+  el("wishlist-movies-actions").style.display =
+    mode === "books" ? "none" : "flex";
+  el("wishlist-books-actions").style.display =
+    mode === "books" ? "flex" : "none";
+}
+
+function renderBooksWishlist() {
+  const grid = el("books-wishlist-grid");
+  let list = state.booksWishlist;
+  const f = state.booksWishlistFilters;
+  if (f.q) {
+    const q = f.q.toLowerCase();
+    list = list.filter(
+      (b) =>
+        b.title?.toLowerCase().includes(q) ||
+        (b.authors || []).some((a) => a.toLowerCase().includes(q)),
+    );
+  }
+  if (f.genre) list = list.filter((b) => (b.genres || []).includes(f.genre));
+  list = [...list].sort((a, b) => {
+    const key = f.sort;
+    const av = key === "author" ? a.authors?.[0] || "" : (a[key] ?? "");
+    const bv = key === "author" ? b.authors?.[0] || "" : (b[key] ?? "");
+    return av < bv ? 1 : av > bv ? -1 : 0;
+  });
+  if (!list.length) {
+    grid.innerHTML = state.booksWishlist.length
+      ? '<div class="empty"><span>No books match your filters.</span></div>'
+      : `<div class="empty"><span>Your book wish list is empty.</span><span>Click <strong>+ Add Book</strong> to add books you want to read.</span></div>`;
+    return;
+  }
+  grid.innerHTML = list.map((b) => bookCard(b, "wishlist")).join("");
+}
+
+async function loadBooksWishlist() {
+  try {
+    state.booksWishlist = await api.getBookWishlist();
+  } catch (err) {
+    showToast(err.message, "error");
+  }
+  renderBooksWishlist();
+  updateBooksWishlistFilterOptions();
+}
+
+function updateBooksWishlistFilterOptions() {
+  const genres = [
+    ...new Set(state.booksWishlist.flatMap((b) => b.genres || [])),
+  ].sort();
+  const sel = el("bwl-filter-genre");
+  const cur = sel.value;
+  sel.innerHTML =
+    '<option value="">All Genres</option>' +
+    genres
+      .map(
+        (g) =>
+          `<option value="${esc(g)}"${g === cur ? " selected" : ""}>${esc(g)}</option>`,
+      )
+      .join("");
+}
+
 // ── Calendar ──────────────────────────────────────────────────────────────────
 
 const MONTH_NAMES = [
@@ -682,8 +1214,12 @@ function renderCalendar() {
     month = d.getMonth();
   el("cal-month-label").textContent = `${MONTH_NAMES[month]} ${year}`;
 
+  const isBooks = state.calendarMode === "books";
+  const items = isBooks ? state.books : state.movies;
+  const noItemEmoji = isBooks ? "📚" : "🎬";
+
   const byDay = {};
-  for (const m of state.movies) {
+  for (const m of items) {
     if (!m.addedAt) continue;
     const md = new Date(m.addedAt);
     if (md.getFullYear() === year && md.getMonth() === month) {
@@ -706,19 +1242,26 @@ function renderCalendar() {
     cells += `<div class="cal-day empty"></div>`;
 
   for (let day = 1; day <= daysInMonth; day++) {
-    const movies = byDay[day] || [];
+    const dayItems = byDay[day] || [];
     const isToday = isThisMonth && today.getDate() === day;
-    const postersHtml = movies
+    const postersHtml = dayItems
       .slice(0, 5)
       .map((m) => {
-        const id = esc(m.imdbId || m.tmdbId?.toString() || "");
-        return m.poster
-          ? `<img class="cal-poster" src="${esc(m.poster)}" data-id="${id}" alt="${esc(m.title)}" loading="lazy">`
-          : `<div class="cal-poster cal-no-poster" data-id="${id}" title="${esc(m.title)}">🎬</div>`;
+        const id = esc(
+          m.imdbId ||
+            m.googleBooksId ||
+            m.tmdbId?.toString() ||
+            m.openLibraryId ||
+            "",
+        );
+        const cover = m.poster || m.cover;
+        return cover
+          ? `<img class="cal-poster" src="${esc(cover)}" data-id="${id}" alt="${esc(m.title)}" loading="lazy">`
+          : `<div class="cal-poster cal-no-poster" data-id="${id}" title="${esc(m.title)}">${noItemEmoji}</div>`;
       })
       .join("");
     cells += `<div class="cal-day${isToday ? " today" : ""}">
-      <span class="cal-day-num${movies.length ? " has-movies" : ""}">${day}</span>
+      <span class="cal-day-num${dayItems.length ? " has-movies" : ""}">${day}</span>
       <div class="cal-day-movies">${postersHtml}</div>
     </div>`;
   }
@@ -747,6 +1290,8 @@ function goToSection(name) {
   if (name === "suggestions" && !state.suggestions.length) loadSuggestions();
   if (name === "trash") loadTrash();
   if (name === "calendar") renderCalendar();
+  if (name === "books" && !state.books.length && !state.loading.books)
+    loadBooks();
 }
 
 // ── Data loaders ──────────────────────────────────────────────────────────────
@@ -781,6 +1326,10 @@ async function loadSuggestions() {
 async function loadSettings() {
   try {
     state.settings = await api.getSettings();
+    if (state.settings.tabsMode) {
+      state.tabsMode = state.settings.tabsMode;
+      applyTabsMode(state.tabsMode);
+    }
     renderSettings();
   } catch {
     /* ignore */
@@ -791,7 +1340,10 @@ async function loadTrash() {
   state.loading.trash = true;
   renderTrash();
   try {
-    state.trash = await api.getTrash();
+    [state.trash, state.booksTrash] = await Promise.all([
+      api.getTrash(),
+      api.getBooksTrash(),
+    ]);
   } catch (err) {
     showToast(err.message, "error");
   }
@@ -827,6 +1379,24 @@ async function removeMovie(id) {
 
 // ── Search (debounced) ────────────────────────────────────────────────────────
 
+const doSearchBooks = debounce(async (query) => {
+  if (!query.trim()) {
+    el("search-results").innerHTML = "";
+    return;
+  }
+  el("search-spinner").classList.remove("hidden");
+  el("search-results").innerHTML = "";
+  try {
+    const results = await api.searchBooks(query);
+    showBookSearchResults(results);
+  } catch (err) {
+    el("search-results").innerHTML =
+      `<div class="no-results">Search error: ${esc(err.message)}</div>`;
+  } finally {
+    el("search-spinner").classList.add("hidden");
+  }
+}, 380);
+
 const doSearch = debounce(async (query) => {
   if (!query.trim()) {
     el("search-results").innerHTML = "";
@@ -854,7 +1424,7 @@ function init() {
   });
 
   // Add movie button
-  el("btn-add").addEventListener("click", openModal);
+  el("btn-add").addEventListener("click", () => openModal("movie"));
 
   // Modal close
   el("modal-overlay").addEventListener("click", (e) => {
@@ -867,6 +1437,10 @@ function init() {
 
   // Search input
   el("search-input").addEventListener("input", (e) => {
+    if (state.modalMode === "book") {
+      doSearchBooks(e.target.value);
+      return;
+    }
     const q = e.target.value.trim();
     if (/^tt\d+$/.test(q)) {
       showMoviePreview(q, null, "movie");
@@ -878,12 +1452,20 @@ function init() {
   // Click on search result
   el("search-results").addEventListener("click", (e) => {
     const result = e.target.closest(".search-result");
-    if (result)
+    if (!result) return;
+    if (state.modalMode === "book") {
+      showBookPreview(
+        result.dataset.googleBooksId || null,
+        result.dataset.openLibraryId || null,
+        result.dataset.source,
+      );
+    } else {
       showMoviePreview(
         result.dataset.imdb || null,
         result.dataset.tmdb || null,
         result.dataset.type,
       );
+    }
   });
 
   // Filters
@@ -1020,37 +1602,69 @@ function init() {
     }
   });
 
-  // Trash grid (restore / delete forever)
+  // Trash grid (restore / delete forever) — handles both movies and books
   el("trash-grid").addEventListener("click", async (e) => {
     if (!e.target.closest("button")) {
-      const imdbId = e.target.closest(".movie-card")?.dataset.imdb;
-      if (imdbId) {
-        window.open(`https://www.imdb.com/title/${imdbId}/`, "_blank");
+      const card = e.target.closest(".movie-card");
+      if (card?.dataset.itemType !== "book") {
+        const imdbId = card?.dataset.imdb;
+        if (imdbId) {
+          window.open(`https://www.imdb.com/title/${imdbId}/`, "_blank");
+          return;
+        }
+      } else if (card?.dataset.googleUrl) {
+        window.open(card.dataset.googleUrl, "_blank");
         return;
       }
     }
+
     const restoreBtn = e.target.closest(".btn-restore");
     if (restoreBtn) {
       const id = restoreBtn.dataset.id;
-      const movie = state.trash.find(
-        (m) => (m.imdbId || m.tmdbId?.toString()) === id,
-      );
-      try {
-        await api.restoreMovie(id);
-        state.trash = state.trash.filter(
-          (m) => (m.imdbId || m.tmdbId?.toString()) !== id,
+      const isBook =
+        restoreBtn.closest(".movie-card")?.dataset.itemType === "book";
+      if (isBook) {
+        const book = state.booksTrash.find(
+          (b) => (b.googleBooksId || b.openLibraryId) === id,
         );
-        if (movie) {
-          delete movie.deletedAt;
-          state.movies.unshift(movie);
-          updateFilterOptions();
-          renderSidebar();
+        try {
+          await api.restoreBook(id);
+          state.booksTrash = state.booksTrash.filter(
+            (b) => (b.googleBooksId || b.openLibraryId) !== id,
+          );
+          if (book) {
+            delete book.deletedAt;
+            state.books.unshift(book);
+            updateBookFilterOptions();
+            renderSidebar();
+          }
+          renderTrash();
+          updateTrashBadge();
+          showToast(`"${book?.title || "Book"}" restored!`, "success");
+        } catch (err) {
+          showToast(err.message, "error");
         }
-        renderTrash();
-        updateTrashBadge();
-        showToast(`"${movie?.title || "Movie"}" restored!`, "success");
-      } catch (err) {
-        showToast(err.message, "error");
+      } else {
+        const movie = state.trash.find(
+          (m) => (m.imdbId || m.tmdbId?.toString()) === id,
+        );
+        try {
+          await api.restoreMovie(id);
+          state.trash = state.trash.filter(
+            (m) => (m.imdbId || m.tmdbId?.toString()) !== id,
+          );
+          if (movie) {
+            delete movie.deletedAt;
+            state.movies.unshift(movie);
+            updateFilterOptions();
+            renderSidebar();
+          }
+          renderTrash();
+          updateTrashBadge();
+          showToast(`"${movie?.title || "Movie"}" restored!`, "success");
+        } catch (err) {
+          showToast(err.message, "error");
+        }
       }
       return;
     }
@@ -1058,41 +1672,71 @@ function init() {
     const deleteBtn = e.target.closest(".btn-delete-forever");
     if (deleteBtn) {
       const id = deleteBtn.dataset.id;
-      const movie = state.trash.find(
-        (m) => (m.imdbId || m.tmdbId?.toString()) === id,
-      );
-      if (
-        !confirm(
-          `Permanently delete "${movie?.title || "this movie"}"? This cannot be undone.`,
-        )
-      )
-        return;
-      try {
-        await api.deleteForever(id);
-        state.trash = state.trash.filter(
-          (m) => (m.imdbId || m.tmdbId?.toString()) !== id,
+      const isBook =
+        deleteBtn.closest(".movie-card")?.dataset.itemType === "book";
+      if (isBook) {
+        const book = state.booksTrash.find(
+          (b) => (b.googleBooksId || b.openLibraryId) === id,
         );
-        renderTrash();
-        updateTrashBadge();
-        showToast("Deleted permanently", "success");
-      } catch (err) {
-        showToast(err.message, "error");
+        if (
+          !confirm(
+            `Permanently delete "${book?.title || "this book"}"? This cannot be undone.`,
+          )
+        )
+          return;
+        try {
+          await api.deleteBookForever(id);
+          state.booksTrash = state.booksTrash.filter(
+            (b) => (b.googleBooksId || b.openLibraryId) !== id,
+          );
+          renderTrash();
+          updateTrashBadge();
+          showToast("Deleted permanently", "success");
+        } catch (err) {
+          showToast(err.message, "error");
+        }
+      } else {
+        const movie = state.trash.find(
+          (m) => (m.imdbId || m.tmdbId?.toString()) === id,
+        );
+        if (
+          !confirm(
+            `Permanently delete "${movie?.title || "this movie"}"? This cannot be undone.`,
+          )
+        )
+          return;
+        try {
+          await api.deleteForever(id);
+          state.trash = state.trash.filter(
+            (m) => (m.imdbId || m.tmdbId?.toString()) !== id,
+          );
+          renderTrash();
+          updateTrashBadge();
+          showToast("Deleted permanently", "success");
+        } catch (err) {
+          showToast(err.message, "error");
+        }
       }
     }
   });
 
-  // Empty trash
+  // Empty trash (movies + books)
   el("btn-empty-trash").addEventListener("click", async () => {
-    if (!state.trash.length) return;
+    const total = state.trash.length + state.booksTrash.length;
+    if (!total) return;
     if (
       !confirm(
-        `Permanently delete all ${state.trash.length} movie${state.trash.length > 1 ? "s" : ""} in Trash? This cannot be undone.`,
+        `Permanently delete all ${total} item${total > 1 ? "s" : ""} in Trash? This cannot be undone.`,
       )
     )
       return;
     try {
-      await api.emptyTrash();
+      await Promise.all([
+        state.trash.length ? api.emptyTrash() : Promise.resolve(),
+        state.booksTrash.length ? api.emptyBooksTrash() : Promise.resolve(),
+      ]);
       state.trash = [];
+      state.booksTrash = [];
       renderTrash();
       updateTrashBadge();
       showToast("Trash emptied", "success");
@@ -1121,13 +1765,94 @@ function init() {
 
   // Refresh suggestions
   el("btn-refresh").addEventListener("click", () => {
-    state.suggestions = [];
-    state.suggFilters = { type: "", genre: "", minRating: "", platform: "" };
-    el("sugg-filter-type").value = "";
-    el("sugg-filter-genre").value = "";
-    el("sugg-filter-rating").value = "";
-    el("sugg-filter-platform").value = "";
-    loadSuggestions();
+    if (state.suggMode === "books") {
+      state.bookSuggestions = [];
+      state.bookSuggFilters = { genre: "" };
+      el("bsugg-filter-genre").value = "";
+      loadBookSuggestions();
+    } else {
+      state.suggestions = [];
+      state.suggFilters = { type: "", genre: "", minRating: "", platform: "" };
+      el("sugg-filter-type").value = "";
+      el("sugg-filter-genre").value = "";
+      el("sugg-filter-rating").value = "";
+      el("sugg-filter-platform").value = "";
+      loadSuggestions();
+    }
+  });
+
+  // Suggestions: mode toggle
+  el("sugg-mode-toggle").addEventListener("click", () => {
+    const next = state.suggMode === "movies" ? "books" : "movies";
+    applySuggMode(next);
+    if (
+      next === "books" &&
+      !state.bookSuggestions.length &&
+      !state.loading.bookSuggestions
+    ) {
+      loadBookSuggestions();
+    }
+  });
+
+  // Book suggestions: genre filter
+  el("bsugg-filter-genre").addEventListener("change", (e) => {
+    state.bookSuggFilters.genre = e.target.value;
+    renderBookSuggestions();
+  });
+
+  // Book suggestions: grid interactions
+  el("book-suggestions-grid").addEventListener("click", async (e) => {
+    if (!e.target.closest("button")) {
+      const card = e.target.closest(".movie-card");
+      if (card?.dataset.googleUrl) {
+        window.open(card.dataset.googleUrl, "_blank");
+        return;
+      }
+    }
+    const addBtn = e.target.closest(".btn-add-book-suggestion");
+    if (addBtn) {
+      addBtn.disabled = true;
+      addBtn.textContent = "Adding…";
+      try {
+        const book = await api.addBook({
+          googleBooksId: addBtn.dataset.googleBooksId || undefined,
+          openLibraryId: addBtn.dataset.openLibraryId || undefined,
+          isbn: addBtn.dataset.isbn || undefined,
+        });
+        state.books.unshift(book);
+        addBtn.textContent = "✓ Added";
+        addBtn.classList.add("added");
+        updateBookFilterOptions();
+        renderSidebar();
+        showToast(`"${book.title}" added to My Books!`, "success");
+      } catch (err) {
+        addBtn.disabled = false;
+        addBtn.textContent = "+ Read";
+        showToast(err.message, "error");
+      }
+      return;
+    }
+    const wlBtn = e.target.closest(".btn-sugg-book-wishlist");
+    if (wlBtn) {
+      wlBtn.disabled = true;
+      wlBtn.textContent = "…";
+      try {
+        const book = await api.addBookToWishlist({
+          googleBooksId: wlBtn.dataset.googleBooksId || undefined,
+          openLibraryId: wlBtn.dataset.openLibraryId || undefined,
+          isbn: wlBtn.dataset.isbn || undefined,
+        });
+        state.booksWishlist.unshift(book);
+        wlBtn.textContent = "★ Listed";
+        wlBtn.classList.add("added");
+        updateBooksWishlistFilterOptions();
+        showToast(`"${book.title}" added to Book Wish List!`, "success");
+      } catch (err) {
+        wlBtn.disabled = false;
+        wlBtn.textContent = "☆ List";
+        showToast(err.message, "error");
+      }
+    }
   });
 
   // Settings form
@@ -1169,6 +1894,43 @@ function init() {
     }
   });
 
+  // NYT API key form
+  el("settings-nyt-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = e.target.querySelector("[type=submit]");
+    btn.disabled = true;
+    btn.textContent = "Saving…";
+    try {
+      state.settings = await api.saveSettings({
+        nyt: el("setting-nyt").value.trim(),
+      });
+      renderSettings();
+      state.bookSuggestions = [];
+      showToast("NYT key saved!", "success");
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+    btn.disabled = false;
+    btn.textContent = "Save Key";
+  });
+
+  el("toggle-nyt-key").addEventListener("click", () => {
+    const inp = el("setting-nyt");
+    inp.type = inp.type === "password" ? "text" : "password";
+  });
+
+  el("btn-clear-nyt-key").addEventListener("click", async () => {
+    if (!confirm("Remove the NYT Books API key?")) return;
+    try {
+      state.settings = await api.saveSettings({ nyt: "" });
+      renderSettings();
+      state.bookSuggestions = [];
+      showToast("NYT key removed", "success");
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  });
+
   // Wish List: group by platform toggle
   el("btn-group-platform").addEventListener("click", () => {
     state.wishlistGroupByPlatform = !state.wishlistGroupByPlatform;
@@ -1180,7 +1942,7 @@ function init() {
   });
 
   // Wish List: add button
-  el("btn-add-wishlist").addEventListener("click", openModal);
+  el("btn-add-wishlist").addEventListener("click", () => openModal("movie"));
 
   // Wish List: filters
   el("search-wishlist").addEventListener(
@@ -1294,6 +2056,117 @@ function init() {
     }
   });
 
+  // Wish List: mode toggle
+  el("wishlist-mode-toggle").addEventListener("click", () => {
+    const next = state.wishlistMode === "movies" ? "books" : "movies";
+    applyWishlistMode(next);
+  });
+
+  // Books wishlist: add button
+  el("btn-add-book-wishlist").addEventListener("click", () =>
+    openModal("book"),
+  );
+
+  // Books wishlist: filters
+  el("search-books-wishlist").addEventListener(
+    "input",
+    debounce((e) => {
+      state.booksWishlistFilters.q = e.target.value;
+      renderBooksWishlist();
+    }, 250),
+  );
+  el("bwl-filter-genre").addEventListener("change", (e) => {
+    state.booksWishlistFilters.genre = e.target.value;
+    renderBooksWishlist();
+  });
+  el("bwl-filter-sort").addEventListener("change", (e) => {
+    state.booksWishlistFilters.sort = e.target.value;
+    renderBooksWishlist();
+  });
+
+  // Books wishlist: grid interactions
+  el("books-wishlist-grid").addEventListener("click", async (e) => {
+    if (!e.target.closest("button, .card-heart")) {
+      const card = e.target.closest(".movie-card");
+      if (card?.dataset.googleUrl) {
+        window.open(card.dataset.googleUrl, "_blank");
+        return;
+      }
+    }
+    const removeBtn = e.target.closest(".btn-remove-x");
+    if (removeBtn) {
+      const id = removeBtn.dataset.id;
+      const book = state.booksWishlist.find(
+        (b) => (b.googleBooksId || b.openLibraryId) === id,
+      );
+      try {
+        await api.removeFromBookWishlist(id);
+        state.booksWishlist = state.booksWishlist.filter(
+          (b) => (b.googleBooksId || b.openLibraryId) !== id,
+        );
+        renderBooksWishlist();
+        updateBooksWishlistFilterOptions();
+        showToast(
+          `"${book?.title || "Book"}" removed from wish list`,
+          "success",
+        );
+      } catch (err) {
+        showToast(err.message, "error");
+      }
+      return;
+    }
+    const readBtn = e.target.closest(".btn-mark-read");
+    if (readBtn) {
+      const id = readBtn.dataset.id;
+      const book = state.booksWishlist.find(
+        (b) => (b.googleBooksId || b.openLibraryId) === id,
+      );
+      readBtn.disabled = true;
+      readBtn.textContent = "Moving…";
+      try {
+        const read = await api.markBookAsRead(id);
+        state.booksWishlist = state.booksWishlist.filter(
+          (b) => (b.googleBooksId || b.openLibraryId) !== id,
+        );
+        state.books.unshift(read);
+        renderBooksWishlist();
+        updateBooksWishlistFilterOptions();
+        renderBooks();
+        updateBookFilterOptions();
+        renderSidebar();
+        showToast(`"${book?.title || "Book"}" moved to My Books!`, "success");
+      } catch (err) {
+        readBtn.disabled = false;
+        readBtn.textContent = "✓ Mark as Read";
+        showToast(err.message, "error");
+      }
+      return;
+    }
+    const heart = e.target.closest(".card-heart");
+    if (heart) {
+      const heartsEl = heart.closest(".card-hearts");
+      const id = heartsEl?.dataset.id;
+      if (!id) return;
+      const val = parseInt(heart.dataset.val);
+      const book = state.booksWishlist.find(
+        (b) => (b.googleBooksId || b.openLibraryId) === id,
+      );
+      if (!book) return;
+      const newVal = book.hearts === val ? 0 : val;
+      try {
+        await api.setBookWishlistHearts(id, newVal);
+        book.hearts = newVal;
+        heartsEl
+          .querySelectorAll(".card-heart")
+          .forEach((h) =>
+            h.classList.toggle("filled", parseInt(h.dataset.val) <= newVal),
+          );
+      } catch (err) {
+        showToast(err.message, "error");
+      }
+    }
+  });
+
   // Calendar navigation
   el("cal-prev").addEventListener("click", () => {
     const d = state.calendarMonth;
@@ -1325,18 +2198,31 @@ function init() {
       return;
     }
     const id = target.dataset.id;
-    const movie = state.movies.find(
-      (m) => (m.imdbId || m.tmdbId?.toString()) === id,
-    );
-    if (!movie) {
+    const isBooks = state.calendarMode === "books";
+    const item = isBooks
+      ? state.books.find((b) => (b.googleBooksId || b.openLibraryId) === id)
+      : state.movies.find((m) => (m.imdbId || m.tmdbId?.toString()) === id);
+    if (!item) {
       tooltip.classList.remove("visible");
       return;
     }
+    const cover = item.poster || item.cover;
+    const metaParts = isBooks
+      ? [
+          item.year,
+          item.authors?.length ? `By ${item.authors[0]}` : null,
+          item.rating ? "★ " + Number(item.rating).toFixed(1) : null,
+        ].filter(Boolean)
+      : [
+          item.year,
+          typeLabel(item.type),
+          item.rating ? "★ " + Number(item.rating).toFixed(1) : null,
+        ].filter(Boolean);
     tooltip.innerHTML = `
-      ${movie.poster ? `<img class="cal-tt-poster" src="${esc(movie.poster)}" alt="">` : ""}
-      <div class="cal-tt-title">${esc(movie.title)}</div>
-      <div class="cal-tt-meta">${[movie.year, typeLabel(movie.type), movie.rating ? "★ " + Number(movie.rating).toFixed(1) : ""].filter(Boolean).join(" · ")}</div>
-      <div class="cal-tt-genres">${(movie.genres || [])
+      ${cover ? `<img class="cal-tt-poster" src="${esc(cover)}" alt="">` : ""}
+      <div class="cal-tt-title">${esc(item.title)}</div>
+      <div class="cal-tt-meta">${metaParts.join(" · ")}</div>
+      <div class="cal-tt-genres">${(item.genres || [])
         .slice(0, 2)
         .map((g) => `<span class="genre-tag">${esc(g)}</span>`)
         .join("")}</div>
@@ -1353,15 +2239,129 @@ function init() {
     const poster = e.target.closest(".cal-poster");
     if (!poster) return;
     const id = poster.dataset.id;
-    const movie = state.movies.find(
-      (m) => (m.imdbId || m.tmdbId?.toString()) === id,
-    );
-    if (movie?.imdbId)
-      window.open(`https://www.imdb.com/title/${movie.imdbId}/`, "_blank");
+    if (state.calendarMode === "books") {
+      const book = state.books.find(
+        (b) => (b.googleBooksId || b.openLibraryId) === id,
+      );
+      if (book?.googleBooksId)
+        window.open(
+          `https://books.google.com/books?id=${book.googleBooksId}`,
+          "_blank",
+        );
+    } else {
+      const movie = state.movies.find(
+        (m) => (m.imdbId || m.tmdbId?.toString()) === id,
+      );
+      if (movie?.imdbId)
+        window.open(`https://www.imdb.com/title/${movie.imdbId}/`, "_blank");
+    }
   });
 
+  // Add book button
+  el("btn-add-book").addEventListener("click", () => openModal("book"));
+
+  // Books: search filter
+  el("search-books").addEventListener(
+    "input",
+    debounce((e) => {
+      state.bookFilters.q = e.target.value;
+      renderBooks();
+    }, 250),
+  );
+  el("book-filter-genre").addEventListener("change", (e) => {
+    state.bookFilters.genre = e.target.value;
+    renderBooks();
+  });
+  el("book-filter-rating").addEventListener("change", (e) => {
+    state.bookFilters.minRating = e.target.value;
+    renderBooks();
+  });
+  el("book-filter-sort").addEventListener("change", (e) => {
+    state.bookFilters.sort = e.target.value;
+    renderBooks();
+  });
+
+  // Books: heart filter
+  el("book-heart-filter").addEventListener("click", (e) => {
+    const h = e.target.closest(".hf-heart");
+    if (!h) return;
+    const val = parseInt(h.dataset.val);
+    state.bookFilters.minHearts = state.bookFilters.minHearts === val ? 0 : val;
+    renderBookHeartFilter();
+    renderBooks();
+  });
+
+  // Books: grid interactions
+  el("books-grid").addEventListener("click", async (e) => {
+    const removeBtn = e.target.closest(".btn-remove-x");
+    if (removeBtn) {
+      removeBook(removeBtn.dataset.id);
+      return;
+    }
+    if (!e.target.closest("button, .card-heart")) {
+      const card = e.target.closest(".movie-card");
+      if (card?.dataset.googleUrl) {
+        window.open(card.dataset.googleUrl, "_blank");
+        return;
+      }
+    }
+    const heart = e.target.closest(".card-heart");
+    if (heart) {
+      const heartsEl = heart.closest(".card-hearts");
+      const id = heartsEl?.dataset.id;
+      if (!id) return;
+      const val = parseInt(heart.dataset.val);
+      const book = state.books.find(
+        (b) => (b.googleBooksId || b.openLibraryId) === id,
+      );
+      if (!book) return;
+      const newVal = book.hearts === val ? 0 : val;
+      try {
+        await api.setBookHearts(id, newVal);
+        book.hearts = newVal;
+        heartsEl.querySelectorAll(".card-heart").forEach((h) => {
+          h.classList.toggle("filled", parseInt(h.dataset.val) <= newVal);
+        });
+        if (state.bookFilters.minHearts > 0) renderBooks();
+      } catch (err) {
+        showToast(err.message, "error");
+      }
+    }
+  });
+
+  // Calendar: mode toggle
+  el("cal-mode-toggle").addEventListener("click", () => {
+    state.calendarMode = state.calendarMode === "movies" ? "books" : "movies";
+    el("cal-mode-label").textContent =
+      state.calendarMode === "books" ? "📚 Books" : "🎬 Movies";
+    renderCalendar();
+  });
+
+  // Settings: triple tabs toggle
+  document.querySelectorAll(".tabs-toggle-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const mode = btn.dataset.mode;
+      applyTabsMode(mode);
+      try {
+        state.settings = await api.saveSettings({ tabsMode: mode });
+      } catch (err) {
+        showToast("Could not save tab preference", "error");
+      }
+    });
+  });
+
+  // Trash: book restore / delete forever (piggybacking on existing trash-grid handler)
+  // handled inside the existing trash-grid click handler below (via data-item-type)
+
   // Initial data load
-  Promise.all([loadMovies(), loadSettings(), loadTrash(), loadWishlist()]);
+  Promise.all([
+    loadMovies(),
+    loadBooks(),
+    loadSettings(),
+    loadTrash(),
+    loadWishlist(),
+    loadBooksWishlist(),
+  ]);
 }
 
 init();
