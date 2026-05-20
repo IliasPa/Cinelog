@@ -22,6 +22,7 @@ const state = {
     q: "",
     minHearts: 0,
     rewatch: false,
+    suggestedBy: "",
   },
   bookFilters: {
     genre: "",
@@ -31,6 +32,7 @@ const state = {
     q: "",
     minHearts: 0,
     rewatch: false,
+    suggestedBy: "",
   },
   notesPopup: { open: false, id: null, type: null },
   suggFilters: { type: "", genre: "", minRating: "", platform: "" },
@@ -45,8 +47,9 @@ const state = {
     sort: "addedAt",
     order: "desc",
     q: "",
+    suggestedBy: "",
   },
-  booksWishlistFilters: { genre: "", sort: "addedAt", q: "" },
+  booksWishlistFilters: { genre: "", sort: "addedAt", q: "", suggestedBy: "" },
   wishlistGroupByPlatform: false,
   calendarMonth: new Date(),
   calendarMode: "movies",
@@ -137,6 +140,10 @@ const api = {
     }),
   setBookReread: (id) =>
     api.patch(`/api/books/${encodeURIComponent(id)}/reread`, {}),
+  setWishlistNotes: (id, notes, suggestedBy) =>
+    api.patch(`/api/wishlist/${encodeURIComponent(id)}/notes`, { notes, suggestedBy }),
+  setBookWishlistNotes: (id, notes, suggestedBy) =>
+    api.patch(`/api/books-wishlist/${encodeURIComponent(id)}/notes`, { notes, suggestedBy }),
   getBooksTrash: () => api.get("/api/books-trash"),
   restoreBook: (id) =>
     api.patch(`/api/books/${encodeURIComponent(id)}/restore`, {}),
@@ -254,7 +261,9 @@ function movieCard(m, mode) {
   const rewatchFlagHtml =
     !isSuggestion && !isTrash && !isWishlist
       ? `<button class="btn-rewatch-flag${m.rewatch ? " active" : ""}" data-id="${movieId}" title="${m.rewatch ? "Marked for rewatch — click to unmark" : "Mark for rewatch"}">🚩</button>`
-      : "";
+      : isWishlist
+        ? `<button class="btn-rewatch-flag btn-notes-overlay${m.notes || m.suggestedBy ? " active" : ""}" data-id="${movieId}" title="Notes">💬</button>`
+        : "";
 
   const action = isSuggestion
     ? `<div class="card-footer"><div class="sugg-actions">
@@ -335,7 +344,9 @@ function bookCard(b, mode) {
   const rewatchFlagHtml =
     !isTrash && !isSuggestion && !isWishlist
       ? `<button class="btn-rewatch-flag${b.rewatch ? " active" : ""}" data-id="${bookId}" title="${b.rewatch ? "Marked for reread — click to unmark" : "Mark for reread"}">🚩</button>`
-      : "";
+      : isWishlist
+        ? `<button class="btn-rewatch-flag btn-notes-overlay${b.notes || b.suggestedBy ? " active" : ""}" data-id="${bookId}" title="Notes">💬</button>`
+        : "";
   let action = "";
   if (isTrash) {
     action = `<div class="trash-actions">
@@ -413,6 +424,7 @@ function renderBooks() {
   if (f.minHearts > 0)
     list = list.filter((b) => (b.hearts || 0) >= f.minHearts);
   if (f.rewatch) list = list.filter((b) => b.rewatch);
+  if (f.suggestedBy) list = list.filter((b) => b.suggestedBy === f.suggestedBy);
   if (!list.length) {
     grid.innerHTML = state.books.length
       ? '<div class="empty"><span>No books match your filters.</span></div>'
@@ -446,6 +458,14 @@ function updateBookFilterOptions() {
           `<option value="${g}" ${f.genre === g ? "selected" : ""}>${esc(g)}</option>`,
       )
       .join("");
+
+  const suggesters = [...new Set(state.books.map((b) => b.suggestedBy).filter(Boolean))].sort();
+  el("book-filter-suggester").innerHTML =
+    '<option value="">All Suggesters</option>' +
+    suggesters
+      .map((s) => `<option value="${esc(s)}" ${f.suggestedBy === s ? "selected" : ""}>${esc(s)}</option>`)
+      .join("");
+  el("book-filter-suggester").style.display = suggesters.length ? "" : "none";
 }
 
 async function loadBooks() {
@@ -504,6 +524,8 @@ function renderMovies() {
   if (state.filters.rewatch) {
     list = list.filter((m) => m.rewatch);
   }
+  if (state.filters.suggestedBy)
+    list = list.filter((m) => m.suggestedBy === state.filters.suggestedBy);
   if (!list.length) {
     grid.innerHTML = state.movies.length
       ? '<div class="empty"><span>No movies match your filters.</span></div>'
@@ -549,6 +571,14 @@ function updateFilterOptions() {
           `<option value="${g}" ${state.filters.genre === g ? "selected" : ""}>${esc(g)}</option>`,
       )
       .join("");
+
+  const suggesters = [...new Set(state.movies.map((m) => m.suggestedBy).filter(Boolean))].sort();
+  el("filter-suggester").innerHTML =
+    '<option value="">All Suggesters</option>' +
+    suggesters
+      .map((s) => `<option value="${esc(s)}" ${state.filters.suggestedBy === s ? "selected" : ""}>${esc(s)}</option>`)
+      .join("");
+  el("filter-suggester").style.display = suggesters.length ? "" : "none";
 }
 
 function updateSuggestionFilterOptions() {
@@ -1088,7 +1118,11 @@ function openNotesPopup(id, type) {
   const item =
     type === "book"
       ? state.books.find((b) => (b.googleBooksId || b.openLibraryId) === id)
-      : state.movies.find((m) => (m.imdbId || m.tmdbId?.toString()) === id);
+      : type === "wishlist-movie"
+        ? state.wishlist.find((m) => (m.imdbId || m.tmdbId?.toString()) === id)
+        : type === "wishlist-book"
+          ? state.booksWishlist.find((b) => (b.googleBooksId || b.openLibraryId) === id)
+          : state.movies.find((m) => (m.imdbId || m.tmdbId?.toString()) === id);
   if (!item) return;
   state.notesPopup = { open: true, id, type };
   el("notes-suggested-by").value = item.suggestedBy || "";
@@ -1113,32 +1147,34 @@ async function saveAndCloseNotes() {
   const hasContent = Boolean(notes || suggestedBy);
   closeNotesPopup();
   try {
-    if (type === "book") {
+    if (type === "wishlist-movie") {
+      await api.setWishlistNotes(id, notes, suggestedBy);
+      const movie = state.wishlist.find((m) => (m.imdbId || m.tmdbId?.toString()) === id);
+      if (movie) { movie.notes = notes; movie.suggestedBy = suggestedBy; }
+      const btn = document.querySelector(`#wishlist-grid .btn-notes-overlay[data-id="${id}"]`);
+      if (btn) btn.classList.toggle("active", hasContent);
+      updateWishlistFilterOptions();
+    } else if (type === "wishlist-book") {
+      await api.setBookWishlistNotes(id, notes, suggestedBy);
+      const book = state.booksWishlist.find((b) => (b.googleBooksId || b.openLibraryId) === id);
+      if (book) { book.notes = notes; book.suggestedBy = suggestedBy; }
+      const btn = document.querySelector(`#books-wishlist-grid .btn-notes-overlay[data-id="${id}"]`);
+      if (btn) btn.classList.toggle("active", hasContent);
+      updateBooksWishlistFilterOptions();
+    } else if (type === "book") {
       await api.setBookNotes(id, notes, suggestedBy);
-      const book = state.books.find(
-        (b) => (b.googleBooksId || b.openLibraryId) === id,
-      );
-      if (book) {
-        book.notes = notes;
-        book.suggestedBy = suggestedBy;
-      }
-      const btn = document.querySelector(
-        `#books-grid .btn-notes[data-id="${id}"]`,
-      );
+      const book = state.books.find((b) => (b.googleBooksId || b.openLibraryId) === id);
+      if (book) { book.notes = notes; book.suggestedBy = suggestedBy; }
+      const btn = document.querySelector(`#books-grid .btn-notes[data-id="${id}"]`);
       if (btn) btn.classList.toggle("has-notes", hasContent);
+      updateBookFilterOptions();
     } else {
       await api.setMovieNotes(id, notes, suggestedBy);
-      const movie = state.movies.find(
-        (m) => (m.imdbId || m.tmdbId?.toString()) === id,
-      );
-      if (movie) {
-        movie.notes = notes;
-        movie.suggestedBy = suggestedBy;
-      }
-      const btn = document.querySelector(
-        `#movies-grid .btn-notes[data-id="${id}"]`,
-      );
+      const movie = state.movies.find((m) => (m.imdbId || m.tmdbId?.toString()) === id);
+      if (movie) { movie.notes = notes; movie.suggestedBy = suggestedBy; }
+      const btn = document.querySelector(`#movies-grid .btn-notes[data-id="${id}"]`);
       if (btn) btn.classList.toggle("has-notes", hasContent);
+      updateFilterOptions();
     }
   } catch (err) {
     showToast(err.message, "error");
@@ -1177,6 +1213,14 @@ function updateWishlistFilterOptions() {
       )
       .join("");
   el("wl-filter-platform").style.display = "";
+
+  const suggesters = [...new Set(state.wishlist.map((m) => m.suggestedBy).filter(Boolean))].sort();
+  el("wl-filter-suggester").innerHTML =
+    '<option value="">All Suggesters</option>' +
+    suggesters
+      .map((s) => `<option value="${esc(s)}" ${f.suggestedBy === s ? "selected" : ""}>${esc(s)}</option>`)
+      .join("");
+  el("wl-filter-suggester").style.display = suggesters.length ? "" : "none";
 }
 
 function renderWishlist() {
@@ -1193,6 +1237,8 @@ function renderWishlist() {
     list = list.filter((m) => (m.rating || 0) >= parseFloat(f.minRating));
   if (f.platform)
     list = list.filter((m) => (m.platforms || []).includes(f.platform));
+  if (f.suggestedBy)
+    list = list.filter((m) => m.suggestedBy === f.suggestedBy);
   list = [...list].sort((a, b) => {
     const av = a[f.sort] ?? "",
       bv = b[f.sort] ?? "";
@@ -1276,6 +1322,7 @@ function renderBooksWishlist() {
     );
   }
   if (f.genre) list = list.filter((b) => (b.genres || []).includes(f.genre));
+  if (f.suggestedBy) list = list.filter((b) => b.suggestedBy === f.suggestedBy);
   list = [...list].sort((a, b) => {
     const key = f.sort;
     const av = key === "author" ? a.authors?.[0] || "" : (a[key] ?? "");
@@ -1302,19 +1349,23 @@ async function loadBooksWishlist() {
 }
 
 function updateBooksWishlistFilterOptions() {
+  const f = state.booksWishlistFilters;
   const genres = [
     ...new Set(state.booksWishlist.flatMap((b) => b.genres || [])),
   ].sort();
-  const sel = el("bwl-filter-genre");
-  const cur = sel.value;
-  sel.innerHTML =
+  el("bwl-filter-genre").innerHTML =
     '<option value="">All Genres</option>' +
     genres
-      .map(
-        (g) =>
-          `<option value="${esc(g)}"${g === cur ? " selected" : ""}>${esc(g)}</option>`,
-      )
+      .map((g) => `<option value="${esc(g)}"${f.genre === g ? " selected" : ""}>${esc(g)}</option>`)
       .join("");
+
+  const suggesters = [...new Set(state.booksWishlist.map((b) => b.suggestedBy).filter(Boolean))].sort();
+  el("bwl-filter-suggester").innerHTML =
+    '<option value="">All Suggesters</option>' +
+    suggesters
+      .map((s) => `<option value="${esc(s)}" ${f.suggestedBy === s ? "selected" : ""}>${esc(s)}</option>`)
+      .join("");
+  el("bwl-filter-suggester").style.display = suggesters.length ? "" : "none";
 }
 
 // ── Calendar ──────────────────────────────────────────────────────────────────
@@ -1874,6 +1925,10 @@ function init() {
     state.filters.sort = e.target.value;
     loadMovies();
   });
+  el("filter-suggester").addEventListener("change", (e) => {
+    state.filters.suggestedBy = e.target.value;
+    renderMovies();
+  });
 
   // Remove movie (X button on poster)
   el("movies-grid").addEventListener("click", async (e) => {
@@ -2395,6 +2450,10 @@ function init() {
     state.wishlistFilters.sort = e.target.value;
     renderWishlist();
   });
+  el("wl-filter-suggester").addEventListener("change", (e) => {
+    state.wishlistFilters.suggestedBy = e.target.value;
+    renderWishlist();
+  });
 
   // Wish List: grid interactions
   el("wishlist-grid").addEventListener("click", async (e) => {
@@ -2404,6 +2463,11 @@ function init() {
         window.open(`https://www.imdb.com/title/${imdbId}/`, "_blank");
         return;
       }
+    }
+    const notesOverlayBtn = e.target.closest(".btn-notes-overlay");
+    if (notesOverlayBtn) {
+      openNotesPopup(notesOverlayBtn.dataset.id, "wishlist-movie");
+      return;
     }
     const removeBtn = e.target.closest(".btn-remove-x");
     if (removeBtn) {
@@ -2506,6 +2570,10 @@ function init() {
     state.booksWishlistFilters.sort = e.target.value;
     renderBooksWishlist();
   });
+  el("bwl-filter-suggester").addEventListener("change", (e) => {
+    state.booksWishlistFilters.suggestedBy = e.target.value;
+    renderBooksWishlist();
+  });
 
   // Books wishlist: grid interactions
   el("books-wishlist-grid").addEventListener("click", async (e) => {
@@ -2515,6 +2583,11 @@ function init() {
         window.open(card.dataset.googleUrl, "_blank");
         return;
       }
+    }
+    const notesOverlayBtn = e.target.closest(".btn-notes-overlay");
+    if (notesOverlayBtn) {
+      openNotesPopup(notesOverlayBtn.dataset.id, "wishlist-book");
+      return;
     }
     const removeBtn = e.target.closest(".btn-remove-x");
     if (removeBtn) {
@@ -2701,6 +2774,10 @@ function init() {
   });
   el("book-filter-sort").addEventListener("change", (e) => {
     state.bookFilters.sort = e.target.value;
+    renderBooks();
+  });
+  el("book-filter-suggester").addEventListener("change", (e) => {
+    state.bookFilters.suggestedBy = e.target.value;
     renderBooks();
   });
 

@@ -1,8 +1,15 @@
-# Cinelog v2.2
+# Cinelog v2.3
 
 A personal movie and book library app that runs locally in your browser.
 
 ![Cinelog](cinelog_app_icon.svg)
+
+## What's new in v2.3
+
+- **Scrollable grid pages** — My Movies, My Books, Suggestions, Wish List, and Trash now scroll naturally; cards are no longer compressed to fit the viewport and take as much space as they need to show all their information
+- **Self-healing poster cache** — on every server start, any movie or book whose poster/cover file is missing from disk (or was never downloaded) is automatically re-fetched from IMDb, TMDB, Google Books, or Open Library; covers all four data sets (movies, wishlist, books, book wishlist)
+- **Suggested by filter** — My Movies, My Books, Wish List (movies and books) each show a "Suggested by" dropdown when at least one item has a suggester recorded; selecting a name filters to only their recommendations; the dropdown appears and updates in real time as you add or edit notes
+- **Notes on Wish List cards** — the 💬 button now appears on the top-left of every wish list card (movies and books) so you can record who suggested it and add a note before you've even watched or read it
 
 ## What's new in v2.2
 
@@ -41,17 +48,17 @@ A personal movie and book library app that runs locally in your browser.
 ### Movies
 - **My Movies** — add by searching IMDb or by IMDb/TMDB ID; track everything you've watched
 - **Heart ratings (1–5)** — rate each title directly on the card; filter by minimum rating
-- **Notes & Suggested by** — private notes per movie; remember who recommended it
+- **Notes & Suggested by** — private notes per movie; remember who recommended it; filter your library by suggester
 - **Rewatch flag** — mark movies for a future rewatch; filter to see only flagged ones
-- **Wish List** — save movies to watch later; streaming platform badges; group by platform view
+- **Wish List** — save movies to watch later; notes and suggester per entry; filter by suggester; streaming platform badges; group by platform view
 - **Suggestions** — personalised picks based on your genres, directors, and actors; platform filter
 - **IMDb links** — click any card to open on IMDb
 
 ### Books
 - **My Books** — search Google Books (fallback: Open Library); covers cached locally
-- **Notes & Suggested by** — private notes per book; remember who recommended it
+- **Notes & Suggested by** — private notes per book; remember who recommended it; filter your library by suggester
 - **Reread flag** — mark books for a future reread; filter to see only flagged ones
-- **Book Wish List** — queue books to read; mark as read to move to your library
+- **Book Wish List** — queue books to read; notes and suggester per entry; filter by suggester; mark as read to move to your library
 - **Book Suggestions** — NYT bestseller lists scored by your reading taste; falls back to Open Library trending if no NYT key is set
 - **Google Books links** — click any book card to open on Google Books
 
@@ -127,6 +134,13 @@ All data files are excluded from git — your library stays private.
 ---
 
 ## Changelog
+
+### v2.3
+
+- Grid pages (My Movies, My Books, Suggestions, Wish List, Trash) now scroll the full page instead of squishing cards into a fixed-height container; cards render at their natural size regardless of how many items are in the list
+- Poster/cover self-healing: at startup, the server scans all movies, books, wishlist entries, and book wishlist entries for missing or externally-linked images and re-downloads them; handles both never-downloaded files and `/api/` paths where the file was deleted from disk
+- "Suggested by" filter dropdown added to My Movies, My Books, Wish List movies, and Wish List books; hidden until at least one item has a suggester recorded; updates in real time as notes are saved
+- Notes button (💬) added to Wish List movie and book cards (top-left of poster), backed by new `/api/wishlist/:id/notes` and `/api/books-wishlist/:id/notes` endpoints
 
 ### v2.2
 

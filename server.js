@@ -794,6 +794,18 @@ app.delete('/api/wishlist/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+app.patch('/api/wishlist/:id/notes', (req, res) => {
+  const { id } = req.params;
+  const { notes, suggestedBy } = req.body;
+  const wishlist = getWishlist();
+  const movie = wishlist.find(m => m.imdbId === id || m.tmdbId?.toString() === id);
+  if (!movie) return res.status(404).json({ error: 'Not found' });
+  movie.notes = typeof notes === 'string' ? notes : '';
+  movie.suggestedBy = typeof suggestedBy === 'string' ? suggestedBy : '';
+  saveWishlist(wishlist);
+  res.json({ ok: true });
+});
+
 app.patch('/api/wishlist/:id/hearts', (req, res) => {
   const { id } = req.params;
   const { hearts } = req.body;
@@ -1224,6 +1236,18 @@ app.delete('/api/books-wishlist/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+app.patch('/api/books-wishlist/:id/notes', (req, res) => {
+  const { id } = req.params;
+  const { notes, suggestedBy } = req.body;
+  const wishlist = getBookWishlist();
+  const book = wishlist.find(b => b.googleBooksId === id || b.openLibraryId === id || b.isbn === id);
+  if (!book) return res.status(404).json({ error: 'Not found' });
+  book.notes = typeof notes === 'string' ? notes : '';
+  book.suggestedBy = typeof suggestedBy === 'string' ? suggestedBy : '';
+  saveBookWishlist(wishlist);
+  res.json({ ok: true });
+});
+
 app.patch('/api/books-wishlist/:id/hearts', (req, res) => {
   const { id } = req.params;
   const { hearts } = req.body;
@@ -1258,4 +1282,129 @@ app.patch('/api/books-wishlist/:id/read', (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`\n  🎬  Cinelog\n  → http://localhost:${PORT}\n`);
+  retryMissingPosters().catch(() => {});
 });
+
+function posterFileExists(movieId) {
+  return ['jpg', 'png', 'webp'].some(ext =>
+    fs.existsSync(path.join(POSTERS_DIR, `${movieId}.${ext}`))
+  );
+}
+
+function coverFileExists(coverId) {
+  const safe = coverId.replace(/[^a-zA-Z0-9_-]/g, '_');
+  return ['jpg', 'png', 'webp'].some(ext =>
+    fs.existsSync(path.join(BOOK_COVERS_DIR, `${safe}.${ext}`))
+  );
+}
+
+async function retryMissingPosters() {
+  // ── Movies ──
+  const movies = getMovies();
+  let moviesChanged = false;
+  for (const movie of movies) {
+    if (movie.deletedAt) continue;
+    const movieId = movie.imdbId || movie.tmdbId?.toString();
+    if (!movieId) continue;
+    const needsFile = movie.poster?.startsWith('/api/posters/') && !posterFileExists(movieId);
+    const isExternal = movie.poster && !movie.poster.startsWith('/api/');
+    if (!needsFile && !isExternal) continue;
+
+    let local = null;
+    if (isExternal) local = await cachePoster(movieId, movie.poster);
+    if (!local && movie.imdbId?.startsWith('tt')) {
+      try {
+        const details = await imdbDetails(movie.imdbId);
+        if (details.poster) local = await cachePoster(movieId, details.poster);
+      } catch { /* ignore */ }
+    }
+    if (!local && movie.tmdbId && getSettings().tmdb) {
+      try {
+        const details = await tmdbDetails(movie.tmdbId, movie.type || 'movie', getSettings().tmdb);
+        if (details.poster) local = await cachePoster(movieId, details.poster);
+      } catch { /* ignore */ }
+    }
+    if (local) {
+      movie.poster = local;
+      moviesChanged = true;
+      console.log(`  ✅  Poster cached: ${movie.title}`);
+    } else {
+      console.log(`  ⚠️  Could not cache poster: ${movie.title}`);
+    }
+  }
+  if (moviesChanged) saveMovies(movies);
+
+  // ── Wishlist ──
+  const wishlist = getWishlist();
+  let wishlistChanged = false;
+  for (const movie of wishlist) {
+    const movieId = movie.imdbId || movie.tmdbId?.toString();
+    if (!movieId) continue;
+    const needsFile = movie.poster?.startsWith('/api/posters/') && !posterFileExists(movieId);
+    const isExternal = movie.poster && !movie.poster.startsWith('/api/');
+    if (!needsFile && !isExternal) continue;
+
+    let local = null;
+    if (isExternal) local = await cachePoster(movieId, movie.poster);
+    if (!local && movie.imdbId?.startsWith('tt')) {
+      try {
+        const details = await imdbDetails(movie.imdbId);
+        if (details.poster) local = await cachePoster(movieId, details.poster);
+      } catch { /* ignore */ }
+    }
+    if (local) { movie.poster = local; wishlistChanged = true; console.log(`  ✅  Wishlist poster cached: ${movie.title}`); }
+  }
+  if (wishlistChanged) saveWishlist(wishlist);
+
+  // ── Books ──
+  const books = getBooks();
+  let booksChanged = false;
+  for (const book of books) {
+    if (book.deletedAt) continue;
+    const coverId = (book.googleBooksId || book.openLibraryId || book.isbn || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+    if (!coverId) continue;
+    const needsFile = book.cover?.startsWith('/api/book-covers/') && !coverFileExists(coverId);
+    const isExternal = book.cover && !book.cover.startsWith('/api/');
+    if (!needsFile && !isExternal) continue;
+
+    let local = null;
+    if (isExternal) local = await cacheBookCover(coverId, book.cover);
+    if (!local && book.googleBooksId) {
+      try {
+        const details = await googleBooksDetails(book.googleBooksId);
+        if (details.cover) local = await cacheBookCover(coverId, details.cover);
+      } catch { /* ignore */ }
+    }
+    if (!local && book.openLibraryId) {
+      try {
+        const details = await openLibraryDetails(book.openLibraryId);
+        if (details.cover) local = await cacheBookCover(coverId, details.cover);
+      } catch { /* ignore */ }
+    }
+    if (local) { book.cover = local; booksChanged = true; console.log(`  ✅  Book cover cached: ${book.title}`); }
+    else { console.log(`  ⚠️  Could not cache cover: ${book.title}`); }
+  }
+  if (booksChanged) saveBooks(books);
+
+  // ── Books Wishlist ──
+  const bwl = getBookWishlist();
+  let bwlChanged = false;
+  for (const book of bwl) {
+    const coverId = (book.googleBooksId || book.openLibraryId || book.isbn || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+    if (!coverId) continue;
+    const needsFile = book.cover?.startsWith('/api/book-covers/') && !coverFileExists(coverId);
+    const isExternal = book.cover && !book.cover.startsWith('/api/');
+    if (!needsFile && !isExternal) continue;
+
+    let local = null;
+    if (isExternal) local = await cacheBookCover(coverId, book.cover);
+    if (!local && book.googleBooksId) {
+      try {
+        const details = await googleBooksDetails(book.googleBooksId);
+        if (details.cover) local = await cacheBookCover(coverId, details.cover);
+      } catch { /* ignore */ }
+    }
+    if (local) { book.cover = local; bwlChanged = true; console.log(`  ✅  Book wishlist cover cached: ${book.title}`); }
+  }
+  if (bwlChanged) saveBookWishlist(bwl);
+}

@@ -172,9 +172,19 @@ nav {
 /* ── Main ──────────────────────────────────────────────────────────────────── */
 #main {
   flex: 1;
-  overflow: hidden;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
+}
+#main::-webkit-scrollbar {
+  width: 6px;
+}
+#main::-webkit-scrollbar-track {
+  background: transparent;
+}
+#main::-webkit-scrollbar-thumb {
+  background: var(--border2);
+  border-radius: 3px;
 }
 
 .section {
@@ -182,6 +192,24 @@ nav {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+/* Grid sections grow to natural height; #main scrolls */
+#section-movies,
+#section-books,
+#section-suggestions,
+#section-wishlist,
+#section-trash {
+  height: auto;
+  overflow: visible;
+}
+
+/* Section panels inside grid sections flow naturally */
+#section-suggestions .section-panel,
+#section-wishlist .section-panel {
+  flex: none;
+  overflow: visible;
+  min-height: auto;
 }
 .section.hidden {
   display: none;
@@ -298,19 +326,8 @@ nav {
   grid-template-columns: repeat(auto-fill, minmax(var(--card-w), 1fr));
   gap: 18px;
   padding: 0 28px 28px;
-  overflow-y: auto;
-  flex: 1;
+  overflow-y: visible;
   align-content: start;
-}
-.movie-grid::-webkit-scrollbar {
-  width: 6px;
-}
-.movie-grid::-webkit-scrollbar-track {
-  background: transparent;
-}
-.movie-grid::-webkit-scrollbar-thumb {
-  background: var(--border2);
-  border-radius: 3px;
 }
 
 /* ── Movie Card ────────────────────────────────────────────────────────────── */
@@ -553,6 +570,17 @@ nav {
   opacity: 1;
   filter: grayscale(0);
 }
+/* Notes overlay button (wishlist cards, top-left) — no grayscale since 💬 is colourless */
+.btn-notes-overlay {
+  filter: none !important;
+}
+.movie-card:hover .btn-notes-overlay {
+  filter: none !important;
+}
+.btn-notes-overlay.active {
+  filter: none !important;
+}
+
 .btn-rewatch-flag:hover {
   opacity: 1 !important;
   filter: grayscale(0) !important;
@@ -1556,8 +1584,7 @@ nav {
   flex-direction: column;
   gap: 28px;
   padding: 0 28px 28px;
-  overflow-y: auto;
-  flex: 1;
+  overflow-y: visible;
 }
 .trash-outer-grid::-webkit-scrollbar {
   width: 6px;
