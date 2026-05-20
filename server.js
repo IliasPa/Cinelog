@@ -250,6 +250,8 @@ async function imdbDetails(imdbId) {
     plot: d.plot || '',
     poster: d.primaryImage?.url || null,
     runtime: d.runtimeSeconds || null,
+    language: d.primaryLanguage || (Array.isArray(d.languages) ? d.languages[0] : null) || null,
+    keywords: [],
     source: 'imdb'
   };
 }
@@ -334,16 +336,18 @@ async function tmdbWatchProviders(tmdbId, isTv, apiKey, country = 'US') {
 async function tmdbDetails(tmdbId, mediaType, apiKey) {
   const isTv = mediaType === 'tvSeries' || mediaType === 'tv';
   const ep = isTv ? `/tv/${tmdbId}` : `/movie/${tmdbId}`;
-  const [d, credits, ext] = await Promise.all([
+  const [d, credits, ext, kw] = await Promise.all([
     tmdbFetch(ep, apiKey),
     tmdbFetch(`${ep}/credits`, apiKey),
-    tmdbFetch(`${ep}/external_ids`, apiKey)
+    tmdbFetch(`${ep}/external_ids`, apiKey),
+    tmdbFetch(`${ep}/keywords`, apiKey).catch(() => ({}))
   ]);
   const genres = (d.genres || []).map(g => g.name);
   const directors = isTv
     ? (d.created_by || []).slice(0, 3).map(c => ({ id: `tm_${c.id}`, name: c.name }))
     : (credits.crew || []).filter(c => c.job === 'Director').slice(0, 3).map(c => ({ id: `tm_${c.id}`, name: c.name }));
   const stars = (credits.cast || []).slice(0, 5).map(c => ({ id: `tm_${c.id}`, name: c.name }));
+  const keywords = ((isTv ? kw.results : kw.keywords) || []).slice(0, 15).map(k => k.name.toLowerCase());
   return {
     imdbId: ext.imdb_id || null,
     tmdbId: d.id,
@@ -359,67 +363,117 @@ async function tmdbDetails(tmdbId, mediaType, apiKey) {
     plot: d.overview || '',
     poster: d.poster_path ? `${TMDB_IMG}${d.poster_path}` : null,
     runtime: d.runtime ? d.runtime * 60 : (d.episode_run_time?.[0] ? d.episode_run_time[0] * 60 : null),
+    language: d.original_language || null,
+    keywords,
     source: 'tmdb'
   };
 }
 
 // ── Scoring ───────────────────────────────────────────────────────────────────
 
+// Only movies/series rated 3-5 hearts shape the profile.
+// Each item's contribution is weighted by (hearts / 5) — the rating multiplier.
 function buildProfile(watched) {
-  const genres = {};
-  const directorIds = new Set();
-  const actorCounts = {};
-  let ratingSum = 0, ratingCount = 0;
+  const qualifying = watched.filter(m => (m.hearts || 0) >= 3);
 
-  for (const m of watched) {
-    for (const g of (m.genres || [])) genres[g] = (genres[g] || 0) + 1;
-    for (const d of (m.directors || [])) directorIds.add(d.id);
-    for (const s of (m.stars || [])) actorCounts[s.id] = (actorCounts[s.id] || 0) + 1;
-    if (m.rating) { ratingSum += m.rating; ratingCount++; }
+  const genres = {};
+  const directorScores = {};
+  const actorScores = {};
+  const decades = {};
+  const types = {};
+  const languages = {};
+  const tags = {};
+
+  for (const m of qualifying) {
+    const w = (m.hearts || 3) / 5;
+    for (const g of (m.genres || [])) genres[g] = (genres[g] || 0) + w;
+    for (const d of (m.directors || [])) directorScores[d.id] = (directorScores[d.id] || 0) + w;
+    for (const s of (m.stars || [])) actorScores[s.id] = (actorScores[s.id] || 0) + w;
+    if (m.year) { const dec = Math.floor(m.year / 10) * 10; decades[dec] = (decades[dec] || 0) + w; }
+    if (m.type) types[m.type] = (types[m.type] || 0) + w;
+    if (m.language) languages[m.language] = (languages[m.language] || 0) + w;
+    for (const t of (m.keywords || [])) tags[t] = (tags[t] || 0) + w;
   }
 
-  const topActors = new Set(
-    Object.entries(actorCounts).sort(([, a], [, b]) => b - a).slice(0, 3).map(([id]) => id)
-  );
-  const avgRating = ratingCount ? ratingSum / ratingCount : 7;
   const genreTotal = Object.values(genres).reduce((a, b) => a + b, 0) || 1;
+  const tagTotal = Object.values(tags).reduce((a, b) => a + b, 0) || 1;
+  const typeTotal = Object.values(types).reduce((a, b) => a + b, 0) || 1;
+  const languageTotal = Object.values(languages).reduce((a, b) => a + b, 0) || 1;
+  const decadeTotal = Object.values(decades).reduce((a, b) => a + b, 0) || 1;
 
-  return { genres, genreTotal, directorIds, topActors, avgRating };
+  return { genres, genreTotal, directorScores, actorScores, decades, decadeTotal, types, typeTotal, languages, languageTotal, tags, tagTotal };
 }
 
+// Max 100 pts:  Genre 20 | Director 20 | Rating 15 | Tags 15 | Actors 10 | Decade 10 | Language 5 | Type 5
 function score(candidate, profile, watchedIds) {
-  const cid = candidate.imdbId || candidate.tmdbId?.toString();
-  if (!cid || watchedIds.has(cid)) return null;
   if (candidate.imdbId && watchedIds.has(candidate.imdbId)) return null;
   if (candidate.tmdbId && watchedIds.has(candidate.tmdbId?.toString())) return null;
+  if (!candidate.imdbId && !candidate.tmdbId) return null;
 
   let points = 0;
   const reasons = [];
 
-  // Genre (up to 40 pts)
+  // Genre (20 pts max)
+  let genreScore = 0;
   const matchGenres = [];
   for (const g of (candidate.genres || [])) {
-    if (profile.genres[g]) {
-      points += (profile.genres[g] / profile.genreTotal) * 40;
-      matchGenres.push(g);
-    }
+    if (profile.genres[g]) { genreScore += (profile.genres[g] / profile.genreTotal) * 20; matchGenres.push(g); }
   }
+  points += Math.min(genreScore, 20);
   if (matchGenres.length) reasons.push(`Genre: ${matchGenres.slice(0, 2).join(', ')}`);
 
-  // Director (30 pts)
-  const matchDirs = (candidate.directors || []).filter(d => profile.directorIds.has(d.id));
-  if (matchDirs.length) { points += 30; reasons.push(`Director: ${matchDirs[0].name}`); }
+  // Director (20 pts max, amplified by your hearts rating via profile weights)
+  let dirScore = 0;
+  const matchDirs = [];
+  for (const d of (candidate.directors || [])) {
+    if (profile.directorScores[d.id]) { dirScore += profile.directorScores[d.id] * 20; matchDirs.push(d.name); }
+  }
+  points += Math.min(dirScore, 20);
+  if (matchDirs.length) reasons.push(`Director: ${matchDirs[0]}`);
 
-  // Top actors (10 pts each, max 30)
+  // IMDb Rating tiers (15 pts max)
+  const r = candidate.rating || 0;
+  if (r >= 8) points += 15;
+  else if (r >= 7) points += 10;
+  else if (r >= 5) points += 5;
+
+  // Subgenre / tone / mood tags (15 pts max)
+  let tagScore = 0;
+  const matchTags = [];
+  for (const t of (candidate.keywords || [])) {
+    if (profile.tags[t]) { tagScore += (profile.tags[t] / profile.tagTotal) * 15; matchTags.push(t); }
+  }
+  points += Math.min(tagScore, 15);
+  if (matchTags.length) reasons.push(`Themes: ${matchTags.slice(0, 2).join(', ')}`);
+
+  // Actors (10 pts max, amplified by hearts rating via profile weights)
+  let actorScore = 0;
   const matchActors = [];
   for (const s of (candidate.stars || [])) {
-    if (profile.topActors.has(s.id)) { points += 10; matchActors.push(s.name); }
+    if (profile.actorScores[s.id]) { actorScore += profile.actorScores[s.id] * 10; matchActors.push(s.name); }
   }
+  points += Math.min(actorScore, 10);
   if (matchActors.length) reasons.push(`Stars: ${matchActors.slice(0, 2).join(', ')}`);
 
-  // Rating (up to 20 pts)
-  const r = candidate.rating || 5;
-  points += Math.max(0, ((r - 5) / 5) * 20);
+  // Decade (10 pts max)
+  if (candidate.year) {
+    const dec = Math.floor(candidate.year / 10) * 10;
+    if (profile.decades[dec]) {
+      const decScore = Math.min((profile.decades[dec] / profile.decadeTotal) * 10, 10);
+      points += decScore;
+      if (decScore >= 3) reasons.push(`${dec}s`);
+    }
+  }
+
+  // Country / language (5 pts max)
+  if (candidate.language && profile.languages[candidate.language]) {
+    points += Math.min((profile.languages[candidate.language] / profile.languageTotal) * 5, 5);
+  }
+
+  // Type (5 pts max)
+  if (candidate.type && profile.types[candidate.type]) {
+    points += Math.min((profile.types[candidate.type] / profile.typeTotal) * 5, 5);
+  }
 
   return { points, reasons: reasons.length ? reasons : ['Popular pick'] };
 }
@@ -497,7 +551,7 @@ async function suggestTmdb(watched, apiKey, country = 'US') {
       Object.entries(TMDB_GENRE_REVERSE).find(([k]) => g.toLowerCase().includes(k))?.[1])
     .filter(Boolean);
 
-  const tmdbWatched = watched.filter(m => m.tmdbId).slice(0, 5);
+  const tmdbWatched = watched.filter(m => m.tmdbId && (m.hearts || 0) >= 3).slice(0, 5);
 
   const requests = [
     ...tmdbWatched.map(m =>
@@ -865,15 +919,103 @@ app.post('/api/settings', (req, res) => {
 
 // ── Book suggestions ──────────────────────────────────────────────────────────
 
+// Only books rated 3-5 hearts shape the profile; contribution weighted by (hearts / 5).
 function buildBookProfile(books) {
+  const qualifying = books.filter(b => (b.hearts || 0) >= 3);
+
   const genres = {};
-  const authors = new Set();
-  for (const b of books) {
-    for (const g of (b.genres || [])) genres[g] = (genres[g] || 0) + 1;
-    for (const a of (b.authors || [])) authors.add(a.toLowerCase().trim());
+  const authorScores = {};
+  const decades = {};
+  const languages = {};
+  const seriesTitles = new Set();
+
+  for (const b of qualifying) {
+    const w = (b.hearts || 3) / 5;
+    for (const g of (b.genres || [])) genres[g] = (genres[g] || 0) + w;
+    for (const a of (b.authors || [])) {
+      const key = a.toLowerCase().trim();
+      authorScores[key] = (authorScores[key] || 0) + w;
+    }
+    if (b.year) { const dec = Math.floor(b.year / 10) * 10; decades[dec] = (decades[dec] || 0) + w; }
+    if (b.language) languages[b.language] = (languages[b.language] || 0) + w;
+    if (b.series) seriesTitles.add(b.series.toLowerCase().trim());
   }
+
   const genreTotal = Object.values(genres).reduce((s, v) => s + v, 0) || 1;
-  return { genres, genreTotal, authors };
+  const decadeTotal = Object.values(decades).reduce((s, v) => s + v, 0) || 1;
+  const languageTotal = Object.values(languages).reduce((s, v) => s + v, 0) || 1;
+
+  return { genres, genreTotal, authorScores, decades, decadeTotal, languages, languageTotal, seriesTitles };
+}
+
+// Max 98 pts: Genre 20 | Author 20 | Rating 15 | Tags 15 | Writing style 10* | Language 8 | Decade 5 | Series 5
+// *Writing style not yet available from APIs; scores 0 until data is enriched.
+function scoreBook(candidate, profile, readIds) {
+  if (candidate.googleBooksId && readIds.has(candidate.googleBooksId)) return null;
+  if (candidate.openLibraryId && readIds.has(candidate.openLibraryId)) return null;
+  if (candidate.isbn && readIds.has(candidate.isbn)) return null;
+  if (!candidate.googleBooksId && !candidate.openLibraryId && !candidate.isbn) return null;
+
+  let points = 0;
+  const reasons = [];
+
+  // Genre (20 pts max)
+  let genreScore = 0;
+  const matchGenres = [];
+  for (const g of (candidate.genres || [])) {
+    if (profile.genres[g]) { genreScore += (profile.genres[g] / profile.genreTotal) * 20; matchGenres.push(g); }
+  }
+  points += Math.min(genreScore, 20);
+  if (matchGenres.length) reasons.push(`Genre: ${matchGenres.slice(0, 2).join(', ')}`);
+
+  // Author (20 pts max, amplified by hearts rating via profile weights)
+  let authorScore = 0;
+  const matchAuthors = [];
+  for (const a of (candidate.authors || [])) {
+    const key = a.toLowerCase().trim();
+    if (profile.authorScores[key]) { authorScore += profile.authorScores[key] * 20; matchAuthors.push(a); }
+  }
+  points += Math.min(authorScore, 20);
+  if (matchAuthors.length) reasons.push(`Author: ${matchAuthors[0]}`);
+
+  // Rating tiers (15 pts max) — using Goodreads-style 1-5 scale
+  const r = candidate.rating || 0;
+  if (r >= 4.2) points += 15;
+  else if (r >= 3.8) points += 10;
+  else if (r >= 3.0) points += 5;
+
+  // Subgenre / tone / mood tags via subjects (15 pts max)
+  let tagScore = 0;
+  const matchTags = [];
+  for (const t of (candidate.subjects || candidate.tags || [])) {
+    const key = typeof t === 'string' ? t.toLowerCase() : t;
+    if (profile.genres[key]) { tagScore += (profile.genres[key] / profile.genreTotal) * 15; matchTags.push(t); }
+  }
+  points += Math.min(tagScore, 15);
+  if (matchTags.length) reasons.push(`Themes: ${matchTags.slice(0, 2).join(', ')}`);
+
+  // Country / language (8 pts max)
+  if (candidate.language && profile.languages[candidate.language]) {
+    points += Math.min((profile.languages[candidate.language] / profile.languageTotal) * 8, 8);
+  }
+
+  // Decade (5 pts max)
+  if (candidate.year) {
+    const dec = Math.floor(candidate.year / 10) * 10;
+    if (profile.decades[dec]) {
+      const decScore = Math.min((profile.decades[dec] / profile.decadeTotal) * 5, 5);
+      points += decScore;
+      if (decScore >= 2) reasons.push(`${dec}s`);
+    }
+  }
+
+  // Series flag (5 pts)
+  if (candidate.series && profile.seriesTitles.has(candidate.series.toLowerCase().trim())) {
+    points += 5;
+    reasons.push(`Series: ${candidate.series}`);
+  }
+
+  return { points, reasons: reasons.length ? reasons : ['Popular pick'] };
 }
 
 async function resolveBookByIsbn(isbn) {
@@ -928,10 +1070,10 @@ async function nytBooksList(listName, apiKey) {
 
 async function suggestBooksNyt(books, apiKey) {
   const profile = buildBookProfile(books);
-  const readIsbns = new Set(books.map(b => b.isbn).filter(Boolean));
   const readIds = new Set([
     ...books.map(b => b.googleBooksId).filter(Boolean),
     ...books.map(b => b.openLibraryId).filter(Boolean),
+    ...books.map(b => b.isbn).filter(Boolean),
   ]);
 
   const allLists = await Promise.allSettled(NYT_LISTS.map(l => nytBooksList(l, apiKey)));
@@ -941,11 +1083,13 @@ async function suggestBooksNyt(books, apiKey) {
   for (const res of allLists) {
     if (res.status !== 'fulfilled') continue;
     for (const book of res.value) {
-      if (!book.isbn || seen.has(book.isbn) || readIsbns.has(book.isbn)) continue;
+      if (!book.isbn || seen.has(book.isbn)) continue;
       seen.add(book.isbn);
-      const authorBonus = (book.authors || []).some(a => profile.authors.has(a.toLowerCase().trim())) ? 30 : 0;
-      const popularityScore = Math.min((book.nytWeeksOnList || 0) * 2, 20);
-      pool.push({ ...book, points: authorBonus + popularityScore });
+      // Weeks on list acts as a quality proxy for the rating tier
+      const nytRating = book.nytWeeksOnList >= 10 ? 4.3 : book.nytWeeksOnList >= 4 ? 3.9 : 3.1;
+      const candidate = { ...book, rating: nytRating };
+      const s = scoreBook(candidate, profile, readIds);
+      if (s) pool.push({ ...candidate, ...s });
     }
   }
 
@@ -972,21 +1116,17 @@ async function suggestBooksOpenLibrary(books) {
 
     for (const work of (data.works || [])) {
       const olId = work.key?.split('/').pop();
-      if (!olId || seen.has(olId) || readIds.has(olId)) continue;
+      if (!olId || seen.has(olId)) continue;
       seen.add(olId);
 
-      const genreScore = (work.subject || []).reduce((sum, s) => {
-        return sum + (profile.genres[s] ? (profile.genres[s] / profile.genreTotal) * 30 : 0);
-      }, 0);
-      const authorBonus = (work.author_name || []).some(a => profile.authors.has(a.toLowerCase().trim())) ? 30 : 0;
-
-      pool.push({
+      const candidate = {
         googleBooksId: null,
         openLibraryId: olId,
         title: work.title || 'Unknown',
         authors: work.author_name || [],
         year: work.first_publish_year || null,
         genres: (work.subject || []).slice(0, 5),
+        subjects: (work.subject || []).slice(0, 15),
         rating: null,
         ratingCount: 0,
         description: '',
@@ -996,8 +1136,10 @@ async function suggestBooksOpenLibrary(books) {
         isbn: null,
         itemType: 'book',
         source: 'open-library',
-        points: genreScore + authorBonus,
-      });
+      };
+
+      const s = scoreBook(candidate, profile, readIds);
+      if (s) pool.push({ ...candidate, ...s });
     }
 
     return pool.sort((a, b) => b.points - a.points).slice(0, 20);

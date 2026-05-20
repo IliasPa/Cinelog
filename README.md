@@ -1,8 +1,15 @@
-# Cinelog v2.3
+# Cinelog v3.0
 
 A personal movie and book library app that runs locally in your browser.
 
 ![Cinelog](cinelog_app_icon.svg)
+
+## What's new in v3.0
+
+- **Smarter suggestions (beta)** — the recommendation engine has been fully redesigned; only titles you've rated 3–5 hearts shape your taste profile, and every dimension is amplified by how much you loved each title (your hearts rating acts as a multiplier); movie scoring now covers genre, director, IMDb rating tiers, mood/tone tags (via TMDB keywords), actors, decade, language, and type; book scoring covers genre, author, rating, subject tags, language, decade, and series flag
+- **Rating multiplier** — a director or author from a film/book you rated 🐐 (5 hearts) pulls three times harder than one from something you rated 😐 (2 hearts); the formula is `effective weight = aspect weight × (hearts / 5)`
+- **Already-seen penalty** — any title already in your library is automatically excluded from suggestions (score zeroed out)
+- **TMDB keywords** — when using a TMDB API key, suggestions now fetch keyword/tag data alongside credits so mood and tone matching works out of the box
 
 ## What's new in v2.3
 
@@ -51,7 +58,7 @@ A personal movie and book library app that runs locally in your browser.
 - **Notes & Suggested by** — private notes per movie; remember who recommended it; filter your library by suggester
 - **Rewatch flag** — mark movies for a future rewatch; filter to see only flagged ones
 - **Wish List** — save movies to watch later; notes and suggester per entry; filter by suggester; streaming platform badges; group by platform view
-- **Suggestions** — personalised picks based on your genres, directors, and actors; platform filter
+- **Suggestions** *(beta)* — personalised picks scored across genre, director, rating, mood tags, actors, decade, language, and type; only your 3–5 heart titles shape the profile; platform filter
 - **IMDb links** — click any card to open on IMDb
 
 ### Books
@@ -59,7 +66,7 @@ A personal movie and book library app that runs locally in your browser.
 - **Notes & Suggested by** — private notes per book; remember who recommended it; filter your library by suggester
 - **Reread flag** — mark books for a future reread; filter to see only flagged ones
 - **Book Wish List** — queue books to read; notes and suggester per entry; filter by suggester; mark as read to move to your library
-- **Book Suggestions** — NYT bestseller lists scored by your reading taste; falls back to Open Library trending if no NYT key is set
+- **Book Suggestions** *(beta)* — NYT bestseller lists scored across genre, author, rating, subject tags, language, decade, and series flag; falls back to Open Library trending if no NYT key is set
 - **Google Books links** — click any book card to open on Google Books
 
 ### Shared
@@ -134,6 +141,17 @@ All data files are excluded from git — your library stays private.
 ---
 
 ## Changelog
+
+### v3.0
+
+- Redesigned suggestion algorithm (beta) for movies, series, and books
+- Profile is built only from titles rated 3–5 hearts; lower-rated entries are ignored
+- Rating multiplier: each contribution is weighted by `hearts / 5`, so heavily-loved titles pull harder on every dimension
+- Movie scoring: genre (20%), director (20%), IMDb rating tiers ≥8/7/5 (15%), mood/tone tags via TMDB keywords (15%), actors (10%), decade (10%), language (5%), type (5%)
+- Book scoring: genre (20%), author (20%), rating tiers (15%), subject tags (15%), language (8%), decade (5%), series flag (5%)
+- Already-seen penalty: titles already in your library are hard-excluded (score = 0)
+- TMDB details now fetch keywords alongside credits so tag matching works immediately for TMDB users
+- TMDB recommendation seeds now only pull from your 3–5 heart entries
 
 ### v2.3
 
